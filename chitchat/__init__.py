@@ -9,7 +9,6 @@ from chitchat.mixins import CommandMixin
 class Client(Connection, CommandMixin):
     '''
 
-
     '''
     actions = collections.defaultdict(set)
 
@@ -29,13 +28,16 @@ class Client(Connection, CommandMixin):
             await self.disconnect()
 
 
-    def on(self, command, *commands):
+    def on(self, command, *commands, async=False):
 
         commands = command, *commands
 
         def wrapper(func):
 
-            func = asyncio.coroutine(func)
+            if not asyncio.iscoroutine(func):
+                func = asyncio.coroutine(func)
+
+            func.async = async
 
             for command in commands:
                 self.actions[command].add(func)
@@ -54,20 +56,21 @@ class Client(Connection, CommandMixin):
         if synonym:
             actions |= self.actions[synonym]
 
-        if actions:
-            tasks = [asyncio.ensure_future(action(message)) for action in actions]
-            # waiting on tasks allows any action triggered to run in parallel
-            yield from asyncio.wait(tasks)
+        for action in actions:
 
-        return
+            if action.async:
+                # asyncio.ensure_future schedules the tasks for execution
+                # tasks are then asynchronously executed in arbitrary order
+                asyncio.ensure_future(action(message))
+
+            else:
+                yield from action(message)
 
 
 if __name__ == '__main__':
     import os
 
     client = Client(host='irc.rizon.net', port=6667, ssl=False)
-
-    irc.add_support(AWAYLEN=int, DEAF=str)
 
     @client.on('NOTICE')
     def dostuff(message):
@@ -77,22 +80,29 @@ if __name__ == '__main__':
             client.msg('NickServ', message='IDENTIFY {}'.format(os.environ.get('RIZON_PASSWORD')))
 
         elif 'Password accepted' in message.raw:
-            client.join('#padg')
+            client.join('#sakubot')
 
     @client.on('PING')
     def pong(message):
         client.pong(message.params[0])
 
-    @client.on(*irc.ALL)
+    @client.on(*irc.ALL, async=True)
     def log(message):
-        print(message.params)
+        print(message.raw)
 
-    @client.on('KICK')
-    def rejoin(message):
-        channel, nick, reason = message.params
+    @client.on('PRIVMSG')
+    def test(message):
+        if message.nick == 'necromanteion' and message.params[1] == 'sync':
+            for i in range(3):
+                client.msg('#Sakubot', message='sync! {}'.format(i))
+                yield from asyncio.sleep(1)
 
-        if nick == 'Sakubot':
-            client.join(channel)
+    @client.on('PRIVMSG', async=True)
+    def test2(message):
+        if message.nick == 'necromanteion' and message.params[1] == 'async':
+            for i in range(10):
+                print('async! {}'.format(i))
+                yield from asyncio.sleep(0.5)
 
 
     loop = asyncio.get_event_loop()

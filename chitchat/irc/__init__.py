@@ -1,5 +1,6 @@
 import collections
 import re
+import typing
 
 from irc.isupport import *
 from irc.replies import *
@@ -40,14 +41,40 @@ pattern = re.compile('''
                      ''', flags=re.VERBOSE)
 
 
-def re_partition(pattern, message):
+def re_partition(pattern: str, string: str, flags=0) -> typing.Tuple[str, str, str]:
+    '''
+    Split `string` at the first occurrence of `pattern`.
 
-    split = re.split(pattern, message, maxsplit=1)
+    Args:
+        pattern: A string regular expression pattern containing the separator in a capturing group.
+        string: The string to partition.
+        flags: A combination of any of the flags found in the re module, combined using the bitwise OR (the | operator).
 
-    if len(split) < 3:
+    Returns:
+        A 3-tuple containing the part before the separator, the separator itself, and the part after the separator.
+        If the separator is not found, return a 3-tuple containing the string itself, followed by two empty strings.
+        If the separator is not enclosed in a capturing group, return a 3-tuple containing the part before the
+        separator, an empty string, and the part after the separator.
+
+    Raises:
+        re.error: Raised on an invalid regular expression.
+        ValueError: re.split does not currently split a string on an empty pattern match and will raise a
+                    ValueError if it is attempted since Python 3.5.
+    '''
+
+    split = re.split(pattern, string, maxsplit=1, flags=flags)
+
+    length = len(split)
+
+    if length == 1:
+        # pattern not matched
         split.extend([''] * 2)
 
-    return split
+    elif length == 2:
+        # pattern matched but no capturing group included
+        split.insert(1, '')
+
+    return tuple(split)
 
 
 
@@ -60,9 +87,10 @@ def parse(message):
         groups = match.groupdict()
 
         # text is not an argument of the Message constructor, must be removed
-        params = groups.pop('text')
+        params = groups.pop('text', '')
 
-        leading, sep, trailing = re_partition('(?:\A| +)(:)', params)
+        # match colon preceded by either start of line or at least one space
+        leading, sep, trailing = re_partition(r'(?:\A| +)(:)', params)
 
         # sep is only truthy if partition was successful, otherwise all params are stored in leading
         groups['params'] = [*leading.split(), trailing] if sep else leading.split()
@@ -83,7 +111,7 @@ def command(message):
 
 
 
-def supported(message:str, default_factory=list):
+def supported(message: str, default_factory=list) -> dict:
     '''
     Parses an RPL_ISUPPORT (005) message and returns a dict of supported features.
 
@@ -131,3 +159,13 @@ def supported(message:str, default_factory=list):
         features.update(d)
 
     return features
+
+
+if __name__ == '__main__':
+    string = 'Sakubot CHANLIMIT=#:75 CHANNELLEN=50 CHANMODES=beI,k,l,BCMNORScimnpstz ELIST=CMNTU SAFELIST AWAYLEN=160 KNOCK FNC NAMESX UHNAMES EXCEPTS=e INVEX=I :are supported by this server'
+    # match, capture
+    print(re_partition(r'(?:\A| +)(:)', string))
+    # no match
+    print(re_partition(r'(?:\A| +)(:NOMATCH)', string))
+    # match, no capture
+    print(re_partition(r'(?:\A| +):', string))
