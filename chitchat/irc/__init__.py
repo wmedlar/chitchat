@@ -13,6 +13,107 @@ class UnsupportedFormat(TypeError):
     pass
 
 
+class lazyattribute:
+    '''
+    A lazily-evaluated property-like attribute decorator.
+
+    Meant solely for use with data that should only be computed once, as the lazyattribute instance will replace itself
+    with the return value of the decorated function.
+
+    Attributes:
+        fget: The getter function called to evaluate the property.
+        attr: The attribute that this instance is bound to and the name of the getter function.
+    '''
+
+    def __init__(self, fget):
+        '''
+        Initializes the property instance.
+
+        Args:
+            fget: The getter function called to evaluate the property.
+        '''
+        self.fget = fget
+        self.attr = fget.__name__
+
+
+    def __get__(self, instance, owner):
+
+        # instance is None if the property is accessed through the class rather than the instance
+        if instance is None:
+            # return instance of lazyproperty to mimic the behavior of property
+            return self
+
+        # instance is passed to fget as the `self` argument
+        value = self.fget(instance)
+
+        # instance attribute is set to value, replacing this instance of lazyproperty
+        setattr(instance, self.attr, value)
+
+        return value
+
+
+class NewMessage:
+    '''
+    Container for an IRC message with lazily-evaluated attributes.
+
+    Attributes:
+        raw: A string containing the read-only, unparsed message. This attribute is a property with only a getter.
+
+        prefix: A string containing the prefix of the message sender, of the form 'nick[!user[@host]]'. This attribute
+                is evaluated lazily and will reference self.nick, self.user, and self.host, resulting in their
+                evaulation as well.
+
+        nick: A string containing the nickname of the message sender. This attribute is evaluated lazily.
+
+        user: A string containing the user id or identity of the message sender. This attribute is evaluated lazily.
+
+        host: A string containing the host name and domain of the message sender. This attribute is evaluated lazily.
+
+        command: A string containing the command name or three-digit numeric representing the type of message received.
+                 This attribute is evaluated lazily.
+
+        params: A tuple of strings containing the command parameters. This attribute is evaluated lazily.
+    '''
+
+
+    def __init__(self, message):
+        self._raw = message
+
+    @property
+    def raw(self):
+        '''Read-only unparsed message.'''
+        return self._raw
+
+    # @property
+    # def sender(self):
+    #     '''Alias for self.nick.'''
+    #     return self.nick
+
+    @lazyattribute
+    def prefix(self):
+        pass
+
+    @lazyattribute
+    def nick(self):
+        pass
+
+    @lazyattribute
+    def user(self):
+        pass
+
+    @lazyattribute
+    def host(self):
+        pass
+
+    @lazyattribute
+    def command(self):
+        pass
+
+    @lazyattribute
+    def params(self):
+        pass
+
+
 Message = collections.namedtuple('Message', ['raw', 'prefix', 'nick', 'user', 'host', 'command', 'params'])
 
 pattern = re.compile('''
@@ -41,6 +142,10 @@ pattern = re.compile('''
                      ''', flags=re.VERBOSE)
 
 
+
+
+
+
 def re_partition(pattern: str, string: str, flags=0) -> typing.Tuple[str, str, str]:
     '''
     Split `string` at the first occurrence of `pattern`.
@@ -66,14 +171,15 @@ def re_partition(pattern: str, string: str, flags=0) -> typing.Tuple[str, str, s
 
     length = len(split)
 
+    # pattern not matched
     if length == 1:
-        # pattern not matched
         split.extend([''] * 2)
 
+    # pattern matched but no capturing group included
     elif length == 2:
-        # pattern matched but no capturing group included
         split.insert(1, '')
 
+    # returns a tuple rather than list to mimic the behaviour of str.partition
     return tuple(split)
 
 
@@ -99,15 +205,6 @@ def parse(message):
 
     else:
         return None
-
-
-def command(message):
-    match = pattern.match(message)
-
-    if not match:
-        raise UnsupportedFormat('{!r} not in a parsable format'.format(message))
-
-    return match.group('command')
 
 
 

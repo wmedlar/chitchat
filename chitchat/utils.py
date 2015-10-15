@@ -18,14 +18,14 @@ def bytify(message, encoding='UTF-8'):
         An `encoding` encoded bytes object representing the trimmed message.
 
     Raises:
-        None. Any UnicodeError from str.encode will be ignored with errors='ignore'.
+        None. Any UnicodeError from str.encode will be suppressed with errors='ignore'.
     '''
 
     # excess spaces might be wanted in trailing param
     # so we'll leave it alone and only work on the leading params
     leading, sep, trailing = message.partition(':')
 
-    # replace groups of two or more spaces with a single space and concat with trailing
+    # replace groups of two or more spaces with a single space and reform messages
     line = TRIM_PATTERN.sub(' ', leading) + sep + trailing
 
     return line.encode(encoding, errors='ignore')

@@ -1,22 +1,26 @@
+import asyncio
 import itertools
 
 
 from chitchat import utils
 
 
+# consider adding a `sender` attribute that points to self.send
+# easier to override in subclasses
+
 class CommandMixin:
     '''
     A mixin that contains methods to format and send RFC-defined IRC messages, including some commonly implemented
     albeit not officially defined commands and convenience methods for setting modes.
 
-    CommandMixin should be used with a subclass of connection.Connection, or at least a class that implements a
-    single-parameter send method.
+    CommandMixin should be used with a subclass of connection.Connection, or at least a class that implements a send
+    method that accepts a bytes object as the only parameter.
 
     Methods in this class will both send, through self.send, and ultimately return the message sent.
 
     Attributes:
-        encoding: Class attribute representing the encoding used for messages sent by methods of this class.
-                  Defaults to 'UTF-8'.
+        encoding: The encoding string used to encode messages by methods of this class; defaults to 'UTF-8'. This
+                  is a class attribute.
     '''
 
     encoding = 'UTF-8'
@@ -630,12 +634,29 @@ class CommandMixin:
 
 
 class BotMixin:
-    pass
+
+
+    @asyncio.coroutine
+    def mimic(self, target, message, nick=None, user=None, host=None):
+        '''
+        Mimic a received PRIVMSG.
+
+        Typical use is for testing or calling renamed commands from inside deprecated functions.
+
+        Args:
+
+        Returns:
+
+        Raises:
+        '''
+
+        yield from self.trigger()
 
 
 if __name__ == '__main__':
     m = CommandMixin()
     m.send = lambda line: line
+    print(m.sender)
 
     print(m.privmsg('#padg', 'test'))
     print(m.users())

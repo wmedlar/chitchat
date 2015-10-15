@@ -71,6 +71,7 @@ if __name__ == '__main__':
     import os
 
     client = Client(host='irc.rizon.net', port=6667, ssl=False)
+    print(client.encoding)
 
     @client.on('NOTICE')
     def dostuff(message):
