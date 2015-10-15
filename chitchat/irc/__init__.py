@@ -1,8 +1,8 @@
 import re
 import typing
 
-# from irc.isupport import *
-# from irc.replies import *
+from irc.isupport import *
+from irc.replies import *
 
 
 class UnsupportedFormat(TypeError):
@@ -265,32 +265,3 @@ def supported(message: str, default_factory=list) -> dict:
         features.update(d)
 
     return features
-
-
-if __name__ == '__main__':
-    lines = [
-        ':irc.x2x.cc 439 * :Please wait while we process your connection.\r\n',
-        ':irc.x2x.cc 001 Sakubot :Welcome to the Rizon Internet Relay Chat Network Sakubot\r\n',
-        ':irc.x2x.cc 005 Sakubot CALLERID CASEMAPPING=rfc1459 DEAF=D KICKLEN=160 MODES=4 NICKLEN=30 TOPICLEN=390 PREFIX=(qaohv)~&@%+ STATUSMSG=~&@%+ NETWORK=Rizon MAXLIST=beI:250 TARGMAX=ACCEPT:,KICK:1,LIST:1,NAMES:1,NOTICE:4,PRIVMSG:4,WHOIS:1 CHANTYPES=# :are supported by this server\r\n',
-        ':irc.x2x.cc 005 Sakubot CHANLIMIT=#:75 CHANNELLEN=50 CHANMODES=beI,k,l,BCMNORScimnpstz NAMESX UHNAMES AWAYLEN=160 FNC KNOCK ELIST=CMNTU SAFELIST EXCEPTS=e INVEX=I :are supported by this server\r\n',
-        ':irc.x2x.cc 376 Sakubot :End of /MOTD command.\r\n',
-        ':Sakubot!~skbt@Rizon-70FB98F4.dhcp.ftwo.tx.charter.com MODE Sakubot :+ix\r\n',
-        ':NickServ!service@rizon.net NOTICE Sakubot :please choose a different nick.\r\n',
-        ':NickServ!service@rizon.net NOTICE Sakubot :Password incorrect.\r\n',
-        ':py-ctcp!ctcp@ctcp-scanner.rizon.net PRIVMSG Sakubot :VERSION\r\n',
-        ':peer!service@rizon.net NOTICE Sakubot :For network safety, your client is being scanned for open proxies by scanner.rizon.net (80.65.51.220). This scan will not harm your computer.\r\n'
-    ]
-
-    from timeit import Timer
-
-    # t = Timer('oldparse(":peer!service@rizon.net NOTICE Sakubot :For network safety, your client is being '
-    #           'scanned for open proxies by scanner.rizon.net (80.65.51.220). This scan will not harm your computer.")',
-    #           'from __main__ import oldparse')
-    # print(t.timeit(), 'us per iteration')
-
-    t = Timer('m = Message(":peer!service@rizon.net NOTICE Sakubot :For network safety, your client is being '
-              'scanned for open proxies by scanner.rizon.net (80.65.51.220). This scan will not harm your computer.")'
-              '; m.command, m.params',
-              'from __main__ import Message')
-
-    print(t.timeit(), 'us per iteration')
