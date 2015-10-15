@@ -1,9 +1,8 @@
-import collections
 import re
 import typing
 
-from irc.isupport import *
-from irc.replies import *
+# from irc.isupport import *
+# from irc.replies import *
 
 
 class UnsupportedFormat(TypeError):
@@ -52,29 +51,63 @@ class lazyattribute:
         return value
 
 
-class NewMessage:
+def parse(message: str, pattern: typing.re.Pattern[str]):
+    '''
+    Parses the first appearance of `pattern` in `message` and returns it as a string.
+
+    Args:
+        message: A string message to match against `pattern`.
+        pattern: A compiled regular expression for matching message.
+
+    Returns:
+        A string representing the first appearance of `pattern` in `message`, or None if `pattern` is not found in
+        `message`.
+    '''
+
+    match = pattern.search(message)
+
+    if match:
+        # group(0) is the whole string
+        # group(1) is the first captured group
+        return match.group(1)
+
+    else:
+        return None
+
+
+NICK = re.compile(r'^:([^@!\s]*)')
+USER = re.compile(r'^:[^!\s]*!([^@\s]*)')
+HOST = re.compile(r'^:[^@\s]*@([^\s]*)')
+COMMAND = re.compile(r'^(?::[^\s]*\s)?([^\s]*)')
+PARAMS = re.compile(r'^(?::[^\s]*\s)?(?:[^\s]*)\s(.*)\r\n$')
+
+
+class Message:
     '''
     Container for an IRC message with lazily-evaluated attributes.
 
     Attributes:
         raw: A string containing the read-only, unparsed message. This attribute is a property with only a getter.
 
-        prefix: A string containing the prefix of the message sender, of the form 'nick[!user[@host]]'. This attribute
-                is evaluated lazily and will reference self.nick, self.user, and self.host, resulting in their
-                evaulation as well.
+        prefix: A string containing the prefix of the message sender, of the form 'nick[!user[@host]]', or None if the
+                sender's prefix cannot be parsed. This attribute is evaluated lazily and will reference self.nick,
+                self.user, and self.host, resulting in their evaluation as well.
 
-        nick: A string containing the nickname of the message sender. This attribute is evaluated lazily.
+        nick: A string containing the nickname of the message sender, or None if the sender's nickname cannot be parsed.
+              This attribute is evaluated lazily.
 
-        user: A string containing the user id or identity of the message sender. This attribute is evaluated lazily.
+        user: A string containing the user id or identity of the message sender, or None if the sender's identity cannot
+              be parsed. This attribute is evaluated lazily.
 
-        host: A string containing the host name and domain of the message sender. This attribute is evaluated lazily.
+        host: A string containing the host name and domain of the message sender, or None if the sender's host cannot be
+              parsed. This attribute is evaluated lazily.
 
-        command: A string containing the command name or three-digit numeric representing the type of message received.
-                 This attribute is evaluated lazily.
+        command: A string containing the command name or three-digit numeric representing the type of message received,
+                 or None if the command cannot be parsed. This attribute is evaluated lazily.
 
-        params: A tuple of strings containing the command parameters. This attribute is evaluated lazily.
+        params: A tuple of strings containing the command parameters, or an empty tuple if parameters cannot be parsed.
+                This attribute is evaluated lazily.
     '''
-
 
     def __init__(self, message):
         self._raw = message
@@ -91,59 +124,60 @@ class NewMessage:
 
     @lazyattribute
     def prefix(self):
-        pass
+
+        # nick will always appear if a prefix is given
+        # the absence of a nick indicates the absence of a prefix
+        if not self.nick:
+            return None
+
+        prefix = '{nick}'
+
+        # both user and host are optional
+        if self.user:
+            prefix += '!{user}'
+
+        if self.host:
+            prefix += '@{host}'
+
+        return prefix.format(nick=self.nick, user=self.user, host=self.host)
 
     @lazyattribute
     def nick(self):
-        pass
+
+        return parse(self.raw, pattern=NICK)
 
     @lazyattribute
     def user(self):
-        pass
+
+        return parse(self.raw, pattern=USER)
 
     @lazyattribute
     def host(self):
-        pass
+
+        return parse(self.raw, pattern=HOST)
 
     @lazyattribute
-    def command(self):
-        pass
+    def command(self) -> str:
+
+        return parse(self.raw, pattern=COMMAND)
 
     @lazyattribute
-    def params(self):
-        pass
+    def params(self) -> tuple:
 
+        params = parse(self.raw, pattern=PARAMS)
 
-Message = collections.namedtuple('Message', ['raw', 'prefix', 'nick', 'user', 'host', 'command', 'params'])
+        if not params:
+            return ()
 
-pattern = re.compile('''
-      ^(?P<raw>
-          (:                                     # optional prefix begins with : and ends with space
-             (?P<prefix>                         # nick[[!user]@host]
-                 (?P<nick>[^@!\s]*)              # nick does not contain @, !, or space
-                 (                               # user/host pair is optional
-                     (!                          # user always begins with !
-                         (?P<user>[^@]*)         # user does not contain @ or space
-                     )?                          # optional if host is given
-                     (@                          # host always begins with @
-                         (?P<host>[^\s]*)        # host does not contain space
-                     )
-                 )?                              # user/host pair is optional
-             )\s                                 # prefix ends with a space
-          )?                                     # again prefix is optional
-          (?P<command>                           # command (e.g., NICK, JOIN) is required
-             (\w+|\d{3})                         # can be upper case letters or three digits
-          )
-          (\s                                    # optional params begin with a space
-             (?P<text>(.*))                      # parameters encompass remainder of message
-          )?                                     # optional
-          \\r\\n                                 # all irc lines end with a carriage return (\\r) and a newline (\\n)
-      )$
-                     ''', flags=re.VERBOSE)
+        # match colon preceded by either start of line or at least one space
+        leading, sep, trailing = re_partition(r'(?:\A| +)(:)', params)
 
+        # sep is only truthy if partition was successful and separator was captured
+        # otherwise all params are stored in leading
+        return (*leading.split(), trailing) if sep else tuple(leading.split())
 
-
-
+    def __repr__(self):
+        return 'Message(raw={0.raw!r})'.format(self)
 
 
 def re_partition(pattern: str, string: str, flags=0) -> typing.Tuple[str, str, str]:
@@ -181,31 +215,6 @@ def re_partition(pattern: str, string: str, flags=0) -> typing.Tuple[str, str, s
 
     # returns a tuple rather than list to mimic the behaviour of str.partition
     return tuple(split)
-
-
-
-def parse(message):
-
-    match = pattern.match(message)
-
-    if match:
-        # match object in convenient dictionary form
-        groups = match.groupdict()
-
-        # text is not an argument of the Message constructor, must be removed
-        params = groups.pop('text', '')
-
-        # match colon preceded by either start of line or at least one space
-        leading, sep, trailing = re_partition(r'(?:\A| +)(:)', params)
-
-        # sep is only truthy if partition was successful, otherwise all params are stored in leading
-        groups['params'] = [*leading.split(), trailing] if sep else leading.split()
-
-        return Message(**groups)
-
-    else:
-        return None
-
 
 
 def supported(message: str, default_factory=list) -> dict:
@@ -259,10 +268,29 @@ def supported(message: str, default_factory=list) -> dict:
 
 
 if __name__ == '__main__':
-    string = 'Sakubot CHANLIMIT=#:75 CHANNELLEN=50 CHANMODES=beI,k,l,BCMNORScimnpstz ELIST=CMNTU SAFELIST AWAYLEN=160 KNOCK FNC NAMESX UHNAMES EXCEPTS=e INVEX=I :are supported by this server'
-    # match, capture
-    print(re_partition(r'(?:\A| +)(:)', string))
-    # no match
-    print(re_partition(r'(?:\A| +)(:NOMATCH)', string))
-    # match, no capture
-    print(re_partition(r'(?:\A| +):', string))
+    lines = [
+        ':irc.x2x.cc 439 * :Please wait while we process your connection.\r\n',
+        ':irc.x2x.cc 001 Sakubot :Welcome to the Rizon Internet Relay Chat Network Sakubot\r\n',
+        ':irc.x2x.cc 005 Sakubot CALLERID CASEMAPPING=rfc1459 DEAF=D KICKLEN=160 MODES=4 NICKLEN=30 TOPICLEN=390 PREFIX=(qaohv)~&@%+ STATUSMSG=~&@%+ NETWORK=Rizon MAXLIST=beI:250 TARGMAX=ACCEPT:,KICK:1,LIST:1,NAMES:1,NOTICE:4,PRIVMSG:4,WHOIS:1 CHANTYPES=# :are supported by this server\r\n',
+        ':irc.x2x.cc 005 Sakubot CHANLIMIT=#:75 CHANNELLEN=50 CHANMODES=beI,k,l,BCMNORScimnpstz NAMESX UHNAMES AWAYLEN=160 FNC KNOCK ELIST=CMNTU SAFELIST EXCEPTS=e INVEX=I :are supported by this server\r\n',
+        ':irc.x2x.cc 376 Sakubot :End of /MOTD command.\r\n',
+        ':Sakubot!~skbt@Rizon-70FB98F4.dhcp.ftwo.tx.charter.com MODE Sakubot :+ix\r\n',
+        ':NickServ!service@rizon.net NOTICE Sakubot :please choose a different nick.\r\n',
+        ':NickServ!service@rizon.net NOTICE Sakubot :Password incorrect.\r\n',
+        ':py-ctcp!ctcp@ctcp-scanner.rizon.net PRIVMSG Sakubot :VERSION\r\n',
+        ':peer!service@rizon.net NOTICE Sakubot :For network safety, your client is being scanned for open proxies by scanner.rizon.net (80.65.51.220). This scan will not harm your computer.\r\n'
+    ]
+
+    from timeit import Timer
+
+    # t = Timer('oldparse(":peer!service@rizon.net NOTICE Sakubot :For network safety, your client is being '
+    #           'scanned for open proxies by scanner.rizon.net (80.65.51.220). This scan will not harm your computer.")',
+    #           'from __main__ import oldparse')
+    # print(t.timeit(), 'us per iteration')
+
+    t = Timer('m = Message(":peer!service@rizon.net NOTICE Sakubot :For network safety, your client is being '
+              'scanned for open proxies by scanner.rizon.net (80.65.51.220). This scan will not harm your computer.")'
+              '; m.command, m.params',
+              'from __main__ import Message')
+
+    print(t.timeit(), 'us per iteration')
