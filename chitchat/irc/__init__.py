@@ -67,18 +67,17 @@ def parse(message: str, pattern: typing.re.Pattern[str]):
     match = pattern.search(message)
 
     if match:
-        # group(0) is the whole string
-        # group(1) is the first captured group
+        # group(0) is the whole string, group(1) is the first captured group
         return match.group(1)
 
     else:
         return None
 
 
-NICK = re.compile(r'^:([^@!\s]*)')
-USER = re.compile(r'^:[^!\s]*!([^@\s]*)')
-HOST = re.compile(r'^:[^@\s]*@([^\s]*)')
-COMMAND = re.compile(r'^(?::[^\s]*\s)?([^\s]*)')
+NICK = re.compile(r'^:([^@!\s]+)')
+USER = re.compile(r'^:[^!\s]*!([^@\s]+)')
+HOST = re.compile(r'^:[^@\s]*@([^\s]+)')
+COMMAND = re.compile(r'^(?::[^\s]*\s)?([^\s]+)')
 PARAMS = re.compile(r'^(?::[^\s]*\s)?(?:[^\s]*)\s(.*)\r\n$')
 
 
@@ -125,21 +124,18 @@ class Message:
     @lazyattribute
     def prefix(self):
 
-        # nick will always appear if a prefix is given
-        # the absence of a nick indicates the absence of a prefix
-        if not self.nick:
-            return None
+        prefix = ''
 
-        prefix = '{nick}'
+        if self.nick:
+            prefix = '{nick}'
 
-        # both user and host are optional
         if self.user:
             prefix += '!{user}'
 
         if self.host:
             prefix += '@{host}'
 
-        return prefix.format(nick=self.nick, user=self.user, host=self.host)
+        return prefix.format(nick=self.nick, user=self.user, host=self.host) if prefix else None
 
     @lazyattribute
     def nick(self):
