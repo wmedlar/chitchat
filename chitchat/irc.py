@@ -1,77 +1,12 @@
+import operator
 import re
 import typing
 
-from irc.isupport import *
-from irc.replies import *
+
+from chitchat import utils
 
 
-class UnsupportedFormat(TypeError):
-    '''
-    Raised while parsing IRC string if improper format.
-    '''
-    pass
-
-
-class lazyattribute:
-    '''
-    A lazily-evaluated property-like attribute decorator.
-
-    Meant solely for use with data that should only be computed once, as the lazyattribute instance will replace itself
-    with the return value of the decorated function.
-
-    Attributes:
-        fget: The getter function called to evaluate the property.
-        attr: The attribute that this instance is bound to and the name of the getter function.
-    '''
-
-    def __init__(self, fget):
-        '''
-        Initializes the property instance.
-
-        Args:
-            fget: The getter function called to evaluate the property.
-        '''
-        self.fget = fget
-        self.attr = fget.__name__
-
-
-    def __get__(self, instance, owner):
-
-        # instance is None if the property is accessed through the class rather than the instance
-        if instance is None:
-            # return instance of lazyproperty to mimic the behavior of property
-            return self
-
-        # instance is passed to fget as the `self` argument
-        value = self.fget(instance)
-
-        # instance attribute is set to value, replacing this instance of lazyproperty
-        setattr(instance, self.attr, value)
-
-        return value
-
-
-def parse(message: str, pattern: typing.re.Pattern[str]):
-    '''
-    Parses the first appearance of `pattern` in `message` and returns it as a string.
-
-    Args:
-        message: A string message to match against `pattern`.
-        pattern: A compiled regular expression for matching message.
-
-    Returns:
-        A string representing the first appearance of `pattern` in `message`, or None if `pattern` is not found in
-        `message`.
-    '''
-
-    match = pattern.search(message)
-
-    if match:
-        # group(0) is the whole string, group(1) is the first captured group
-        return match.group(1)
-
-    else:
-        return None
+__all__ = ('Message', 'ISUPPORT', 'supported', 'add_support')
 
 
 NICK = re.compile(r'^:([^@!\s]+)')
@@ -108,20 +43,24 @@ class Message:
                 This attribute is evaluated lazily.
     '''
 
+
     def __init__(self, message):
         self._raw = message
+
 
     @property
     def raw(self):
         '''Read-only unparsed message.'''
         return self._raw
 
-    # @property
-    # def sender(self):
-    #     '''Alias for self.nick.'''
-    #     return self.nick
 
-    @lazyattribute
+    @property
+    def sender(self):
+        '''Alias for self.nick.'''
+        return self.nick
+
+
+    @utils.lazyattribute
     def prefix(self):
 
         prefix = ''
@@ -137,27 +76,32 @@ class Message:
 
         return prefix.format(nick=self.nick, user=self.user, host=self.host) if prefix else None
 
-    @lazyattribute
+
+    @utils.lazyattribute
     def nick(self):
 
         return parse(self.raw, pattern=NICK)
 
-    @lazyattribute
+
+    @utils.lazyattribute
     def user(self):
 
         return parse(self.raw, pattern=USER)
 
-    @lazyattribute
+
+    @utils.lazyattribute
     def host(self):
 
         return parse(self.raw, pattern=HOST)
 
-    @lazyattribute
+
+    @utils.lazyattribute
     def command(self) -> str:
 
         return parse(self.raw, pattern=COMMAND)
 
-    @lazyattribute
+
+    @utils.lazyattribute
     def params(self) -> tuple:
 
         params = parse(self.raw, pattern=PARAMS)
@@ -166,59 +110,69 @@ class Message:
             return ()
 
         # match colon preceded by either start of line or at least one space
-        leading, sep, trailing = re_partition(r'(?:\A| +)(:)', params)
+        leading, sep, trailing = utils.re_partition(r'(?:\A| +)(:)', params)
 
         # sep is only truthy if partition was successful and separator was captured
         # otherwise all params are stored in leading
         return (*leading.split(), trailing) if sep else tuple(leading.split())
 
+
     def __repr__(self):
         return 'Message(raw={0.raw!r})'.format(self)
 
 
-def re_partition(pattern: str, string: str, flags=0) -> typing.Tuple[str, str, str]:
+def parse(message: str, pattern: typing.re.Pattern[str]):
     '''
-    Split `string` at the first occurrence of `pattern`.
+    Parses the first appearance of `pattern` in `message` and returns it as a string.
 
     Args:
-        pattern: A string regular expression pattern containing the separator in a capturing group.
-        string: The string to partition.
-        flags: A combination of any of the flags found in the re module, combined using the bitwise OR (the | operator).
+        message: A string message to match against `pattern`.
+        pattern: A compiled regular expression for matching message.
 
     Returns:
-        A 3-tuple containing the part before the separator, the separator itself, and the part after the separator.
-        If the separator is not found, return a 3-tuple containing the string itself, followed by two empty strings.
-        If the separator is not enclosed in a capturing group, return a 3-tuple containing the part before the
-        separator, an empty string, and the part after the separator.
-
-    Raises:
-        re.error: Raised on an invalid regular expression.
-        ValueError: re.split does not currently split a string on an empty pattern match and will raise a
-                    ValueError if it is attempted since Python 3.5.
+        A string representing the first appearance of `pattern` in `message`, or None if `pattern` is not found in
+        `message`.
     '''
 
-    split = re.split(pattern, string, maxsplit=1, flags=flags)
+    match = pattern.search(message)
 
-    length = len(split)
+    if match:
+        # group(0) is the whole string, group(1) is the first captured group
+        return match.group(1)
 
-    # pattern not matched
-    if length == 1:
-        split.extend([''] * 2)
-
-    # pattern matched but no capturing group included
-    elif length == 2:
-        split.insert(1, '')
-
-    # returns a tuple rather than list to mimic the behaviour of str.partition
-    return tuple(split)
+    else:
+        return None
 
 
-def supported(message: str, default_factory=list) -> dict:
+ISUPPORT = {
+    'CASEMAPPING': str,
+    'CHANLIMIT': utils.comma_delimited_many_to_one_mapping,
+    'CHANMODES': operator.methodcaller('split', ','),
+    'CHANNELLEN': int,
+    'CHANTYPES': list,
+    'EXCEPTS': str,
+    # 'IDCHAN': ?
+    'INVEX': str,
+    'KICKLEN': int,
+    'MAXLIST': utils.comma_delimited_many_to_one_mapping,
+    'MODES': int,
+    'NETWORK': str,
+    'NICKLEN': int,
+    'PREFIX': utils.parenthesis_separated_one_to_one_mapping,
+    'SAFELIST': None,
+    'STATUSMSG': list,
+    'STD': str,
+    'TARGMAX': utils.comma_delimited_one_to_one_mapping,
+    'TOPICLEN': int
+}
+
+
+def supported(message: typing.Union[str, Message], default_factory=list) -> dict:
     '''
     Parses an RPL_ISUPPORT (005) message and returns a dict of supported features.
 
     Args:
-        message: A string representing an RPL_ISUPPORT message from an IRC server.
+        message: A string or Message object representing an RPL_ISUPPORT message from an IRC server.
         default_factory: A callable to transform parameters of unsupported (i.e., not in ISUPPORT) features.
                          The default `default_factory` is `list`.
 
@@ -238,7 +192,7 @@ def supported(message: str, default_factory=list) -> dict:
 
     features = {}
 
-    params = parse(message).params
+    params = message.params if isinstance(message, Message) else Message(message).params
 
     # message takes the form <target> [ token=value ]* :are supported by this server
     # trims off the target and message parameters
@@ -261,3 +215,23 @@ def supported(message: str, default_factory=list) -> dict:
         features.update(d)
 
     return features
+
+
+def add_support(other=None, **kwargs):
+    '''
+    Add support for a mapping of parameters: callables to the irc.ISUPPORT dict.
+
+    This method is equivalent to irc.ISUPPORT.update.
+
+    Args:
+        other: A mapping of {parameter: callable} pairs. This is an optional argument.
+        kwargs: This function mimics dict.update, thus arbitrary keyword arguments may be passed instead of a mapping.
+                This is an optional argument.
+
+    Returns:
+        None, to closer mimic dict.update.
+    '''
+
+    ISUPPORT.update(other=other, **kwargs)
+
+    return None

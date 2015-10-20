@@ -1,8 +1,151 @@
 import asyncio
 import itertools
+import re
 
 
-from chitchat import utils
+from chitchat import cmd, irc, utils
+
+
+class BotMixin:
+
+
+    @asyncio.coroutine
+    def triggered_by(self, message):
+        '''A generator of actions triggered by `message`.'''
+
+        actions = self.actions[message.command]
+
+        for action in actions:
+
+            if message.command == cmd.PRIVMSG:
+
+                target, text = message.params
+
+                # actions triggered by PRIVMSGs are not required to have `ignore` or `trigger` attributes,
+                # such as functions decorated by the `on` decorator
+                try:
+
+                    # skip to next action if message does not contain action's trigger
+                    if not action.trigger.search(text):
+                        continue
+
+                    # skip to next action if message was sent by someone matching action's ignore pattern
+                    if action.ignore.match(message.prefix):
+                        continue
+
+                # action has no attribute `trigger` or `ignore`, or either of those is None
+                except AttributeError:
+                    pass
+
+            yield action
+
+
+    def command(self, trigger, *, async=False, ignore=None):
+        '''
+        A function decorator to register a listener called when a PRIVMSG with text matching `trigger` is received,
+        with additional support for nonblocking calls and an ignore list.
+
+        The decorated function should take only one parameter, an irc.Message object containing lazily-parsed
+        parameters in its attributes.
+
+        This decorator uses a function attribute to qualify passed args and kwargs, thus the `async`, `ignore`,
+        and `trigger` attributes of the function must be available to the decorator for use.
+
+        Args:
+            trigger: A string or compiled regex pattern representing the command used to trigger the decorated function
+                     (e.g., "!weather"). If a string is passed it is escaped and converted to a compiled regex pattern.
+                     A string is assumed to be case insensitive. Internally re.search is used instead of re.match to
+                     match the pattern anywhere in the message passed.
+
+            async: A boolean used to specify that this function is to be run as nonblocking. This is a keyword-only
+                   argument.
+
+            ignore: A sequence of string prefix masks (e.g., nick!*@*) to prevent from triggering the decorated
+                    function. This is a keyword-only argument.
+
+        Returns:
+            The decorated function wrapped in asyncio.coroutine.
+        '''
+
+        # if it quacks like a compiled regex...
+        if not hasattr(trigger, 'search'):
+
+            # ensure conversion to string and proper escaping of special characters
+            pattern = re.escape('{}'.format(trigger))
+
+            # assume case-insensitive, this is mentioned in the docstring
+            trigger = re.compile(pattern, flags=re.IGNORECASE)
+
+        def wrapper(func):
+            '''
+            Wraps the decorated function in a coroutine and appends it to self.actions.
+
+            Args:
+                func: The function to be decorated.
+
+            Returns:
+                The decorated function wrapped in asycio.coroutine.
+            '''
+
+            # function must be a coroutine to be yielded from
+            if not asyncio.iscoroutine(func):
+                func = asyncio.coroutine(func)
+
+            # this line looked strange without a comment
+            func.trigger = trigger
+
+            # async attribute is used in self.trigger to determine a blocking or nonblocking call
+            func.async = async
+
+            # ignore attribute is a compiled regex of nickmasks to ignore
+            func.ignore = utils.create_nickmask(ignore) if ignore else None
+
+            # add function to set of PRIVMSG handlers
+            self.actions[cmd.PRIVMSG].add(func)
+
+            return func
+
+        return wrapper
+
+
+    @asyncio.coroutine
+    def mimic(self, target: str, message: str, nick=None, user=None, host=None):
+        '''
+        Mimic a received PRIVMSG.
+
+        This function attempts to construct a valid PRIVMSG string from the parameters given and pass it to
+        self.trigger as if it were organically received. Typical usage is for testing or rerouting of commands.
+
+        Args:
+            target: A string representing the target of the mimicked message; can either be a channel or a nickname.
+            message: A string representing the mimicked message.
+            nick: A string representing the mimicked nickname of the sender. This argument is optional.
+            user: A string representing the mimicked user id or identity of the sender. This argument is optional.
+            host: A string representing the mimicked host name of the sender. This argument is optional.
+
+        Yields:
+            Yields from self.trigger.
+        '''
+
+        # colon signifies presence of prefix, must not be present in a message with no supplied prefix
+        prefix = ':' if any([nick, user, host]) else ''
+        line = 'PRIVMSG {target} :{message}\r\n'
+
+        if nick is not None:
+            prefix += '{nick}'
+
+        if user is not None:
+            prefix += '!{user}'
+
+        if host is not None:
+            prefix += '@{host}'
+
+        if prefix:
+            prefix += ' '
+
+        line = prefix.format(nick=nick, user=user, host=host) + line.format(target=target, message=message)
+
+        yield from self.trigger(irc.Message(line))
 
 
 # consider adding a `sender` attribute that points to self.send
@@ -41,14 +184,13 @@ class CommandMixin:
             password: A string representing the server's connection password.
 
         Returns:
-            A UTF8-encoded bytes object representing the formatted line sent to the server.
+            A UTF-8 encoded bytes object representing the formatted line sent to the server.
         '''
 
         line = 'PASS {password}\n'.format(password=password)
         line = utils.bytify(line, self.encoding)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def nick(self, nickname):
@@ -61,14 +203,13 @@ class CommandMixin:
             nickname: A string representing the desired nickname.
 
         Returns:
-            A UTF8-encoded bytes object representing the formatted line sent to the server.
+            A UTF-8 encoded bytes object representing the formatted line sent to the server.
         '''
 
         line = 'NICK {nickname}\n'.format(nickname=nickname)
         line = utils.bytify(line)
-        self.send(line)
 
-        return line
+        return self.send(line)
 
 
     def user(self, user, realname, mode=0):
@@ -85,16 +226,15 @@ class CommandMixin:
                   user mode 'w' will be set; if the bit 3 is set the user mode 'i' will be set.
 
         Returns:
-            A UTF8-encoded bytes object representing the formatted line sent to the server.
+            A UTF-8 encoded bytes object representing the formatted line sent to the server.
         '''
 
         line = 'USER {user} {mode} * :{realname}\n'.format(user=user,
                                                            mode=mode,
                                                            realname=realname)
         line = utils.bytify(line)
-        self.send(line)
 
-        return line
+        return self.send(line)
 
 
     def oper(self, name, password):
@@ -109,15 +249,14 @@ class CommandMixin:
             password: A string representing the password to register as an operator.
 
         Returns:
-            A UTF8-encoded bytes object representing the formatted line sent to the server.
+            A UTF-8 encoded bytes object representing the formatted line sent to the server.
         '''
 
         line = 'OPER {name} {password}\n'.format(name=name,
                                                  password=password)
         line = utils.bytify(line)
-        self.send(line)
 
-        return line
+        return self.send(line)
 
 
     def service(self, nickname, info, distribution='*', type=0):
@@ -126,26 +265,23 @@ class CommandMixin:
                                                                                distribution=distribution,
                                                                                type=type)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
     
     
     def quit(self, message=None):
         line = 'QUIT\n' if message is None else 'QUIT :{message}\n'.format(message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def squit(self, server, message):
         line = 'SQUIT {server} :{message}\n'.format(server=server,
                                                     message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def join(self, channel, *channels, keys=None):
@@ -154,9 +290,8 @@ class CommandMixin:
         line = 'JOIN {channels} {keys}\n'.format(channels=','.join(channels),
                                                  keys=','.join(keys))
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def part(self, channel, *channels, message=None):
@@ -165,9 +300,8 @@ class CommandMixin:
         line = line.format(channels=','.join(channels),
                            message=message or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def mode(self, target, mode, *params):
@@ -175,18 +309,16 @@ class CommandMixin:
                                                         mode=mode,
                                                         params=' '.join(params))
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def topic(self, channel, topic=None):
         line = 'TOPIC {channel}\n' if topic is None else 'TOPIC {channel} :{topic}\n'
         line = line.format(channel=channel, topic=topic)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def names(self, channel, *channels, target=None):
@@ -194,9 +326,8 @@ class CommandMixin:
         line = 'NAMES {channels} {target}\n'.format(channels=','.join(channels),
                                                     target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def list(self, channel, *channels, target=None):
@@ -204,18 +335,16 @@ class CommandMixin:
         line = 'LIST {channels} {target}\n'.format(channels=','.join(channels),
                                                    target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def invite(self, nickname, channel):
         line = 'INVITE {nickname} {channel}\n'.format(nickname=nickname,
                                                       channel=channel)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def kick(self, channel, nickname, *nicknames, message=None):
@@ -223,18 +352,16 @@ class CommandMixin:
         line = 'KICK {channel} {nicknames}\n' if message is None else 'KICK {channel} {nicknames} :{message}\n'
         line = line.format(channel=channel, nicknames=','.join(nicknames), message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def privmsg(self, target, message):
         line = 'PRIVMSG {target} :{message}\n'.format(target=target,
                                                       message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     # name shortened for convenience
@@ -245,17 +372,15 @@ class CommandMixin:
         line = 'NOTICE {target} :{message}\n'.format(target=target,
                                                      message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def motd(self, target=None):
         line = 'MOTD {target}\n'.format(target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def lusers(self, mask=None, target=None):
@@ -266,17 +391,15 @@ class CommandMixin:
         line = 'LUSERS {mask} {target}\n'.format(mask=mask or '',
                                                  target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def version(self, target=None):
         line = 'VERSION {target}\n'.format(target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def stats(self, query=None, target=None):
@@ -287,9 +410,8 @@ class CommandMixin:
         line = 'STATS {query} {target}\n'.format(query=query or '',
                                                  target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def links(self, mask=None, target=None):
@@ -300,51 +422,45 @@ class CommandMixin:
         line = 'LINKS {target} {mask}\n'.format(mask=mask or '',
                                                 target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def time(self, target=None):
         line = 'TIME {target}\n'.format(target=target or '')
         line = utils.bytify(line)
-        self.send(line)
+        
+        return self.send(line)
 
-        return line
 
-
-    def connect(self, target, port, remote=None):
+    def connect_(self, target, port, remote=None):
         line = 'CONNECT {target} {port} {remote}\n'.format(target=target,
                                                            port=port,
                                                            remote=remote or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def trace(self, target=None):
         line = 'TRACE {target}\n'.format(target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def admin(self, target=None):
         line = 'ADMIN {target}\n'.format(target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def info(self, target=None):
         line = 'INFO {target}\n'.format(target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def servlist(self, mask=None, type=None):
@@ -355,27 +471,24 @@ class CommandMixin:
         line = 'SERVLIST {mask} {type}\n'.format(mask=mask or '',
                                                  type=type or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def squery(self, target, message):
         line = 'SQUERY {target} :{message}\n'.format(target=target,
                                                      message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def who(self, mask=None, oper_only=False):
         line = 'WHO {mask} {o}\n'.format(mask=mask or '',
                                          o='o' if oper_only else '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def whois(self, mask, *masks, target=None):
@@ -383,9 +496,8 @@ class CommandMixin:
         line = 'WHOIS {target} {masks}\n'.format(masks=','.join(masks),
                                                  target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def whowas(self, nickname, *nicknames, count=None, target=None):
@@ -394,74 +506,65 @@ class CommandMixin:
                                                               count=count or '',
                                                               target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def kill(self, nickname, message):
         line = 'KILL {nickname} :{message}\n'.format(nickname=nickname,
                                                      message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def ping(self, target):
         line = 'PING :{target}\n'.format(target=target)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def pong(self, target):
         line = 'PONG :{target}\n'.format(target=target)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def error(self, message):
         line = 'ERROR :{message}\n'.format(message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def away(self, message=None):
         line = 'AWAY\n' if message is None else 'AWAY :{message}\n'.format(message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def rehash(self):
         line = 'REHASH\n'
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def die(self):
         line = 'DIE\n'
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def restart(self):
         line = 'RESTART\n'
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def summon(self, user, target=None, channel=None):
@@ -473,43 +576,38 @@ class CommandMixin:
                                                            target=target or '',
                                                            channel=channel or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def users(self, target=None):
         line = 'USERS {target}\n'.format(target=target or '')
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def wallops(self, message):
         line = 'WALLOPS :{message}\n'.format(message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def userhost(self, nickname, *nicknames):
         nicknames = nickname, *nicknames
         line = 'USERHOST {nicknames}\n'.format(nicknames=' '.join(nicknames))
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def ison(self, nickname, *nicknames):
         nicknames = nickname, *nicknames
         line = 'ISON {nicknames}\n'.format(nicknames=' '.join(nicknames))
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     # Non-RFC-defined commands in alphabetical order
@@ -520,9 +618,8 @@ class CommandMixin:
                                                                   channel=channel,
                                                                   message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def cprivmsg(self, nickname, channel, message):
@@ -530,50 +627,44 @@ class CommandMixin:
                                                                    channel=channel,
                                                                    message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def help(self):
         line = 'HELP\n'
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def knock(self, channel, message=None):
         line = 'KNOCK {channel}\n' if message is None else 'KNOCK {channel} :{message}\n'
         line.format(channel=channel, message=message)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def namesx(self):
         line = 'PROTOCTL NAMESX\n'
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def rules(self):
         line = 'RULES\n'
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def setname(self, realname):
         line = 'SETNAME :{realname}\n'.format(realname=realname)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def silence(self, *nicknames):
@@ -581,9 +672,8 @@ class CommandMixin:
         nicknames = map('+{}'.format, nicknames)
         line = 'SILENCE {nicknames}\n'.format(nicknames=' '.join(nicknames))
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def unsilence(self, *nicknames):
@@ -591,25 +681,22 @@ class CommandMixin:
         nicknames = map('-{}'.format, nicknames)
         line = 'SILENCE {nicknames}\n'.format(nicknames=' '.join(nicknames))
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def uhnames(self):
         line = 'PROTOCTL UHNAMES\n'
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def userip(self, nickname):
         line = 'USERIP {nickname}\n'.format(nickname=nickname)
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def watch(self, *nicknames):
@@ -617,9 +704,8 @@ class CommandMixin:
         nicknames = map('+{}'.format, nicknames)
         line = 'WATCH {nicknames}\n'.format(nicknames=' '.join(nicknames))
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
+        
+        return self.send(line)
 
 
     def unwatch(self, *nicknames):
@@ -627,37 +713,5 @@ class CommandMixin:
         nicknames = map('-{}'.format, nicknames)
         line = 'WATCH {nicknames}\n'.format(nicknames=' '.join(nicknames))
         line = utils.bytify(line)
-        self.send(line)
-
-        return line
-
-
-
-class BotMixin:
-
-
-    @asyncio.coroutine
-    def mimic(self, target, message, nick=None, user=None, host=None):
-        '''
-        Mimic a received PRIVMSG.
-
-        Typical use is for testing or calling renamed commands from inside deprecated functions.
-
-        Args:
-
-        Returns:
-
-        Raises:
-        '''
-
-        yield from self.trigger()
-
-
-if __name__ == '__main__':
-    m = CommandMixin()
-    m.send = lambda line: line
-    print(m.sender)
-
-    print(m.privmsg('#padg', 'test'))
-    print(m.users())
-    print(m.silence())
+        
+        return self.send(line)
