@@ -667,8 +667,9 @@ class CommandMixin:
         return self.send(line)
 
 
-    def silence(self, *nicknames):
+    def silence(self, nickname, *nicknames):
         # only adds nicknames to ignore list, see unsilence to remove
+        nicknames = nickname, *nicknames
         nicknames = map('+{}'.format, nicknames)
         line = 'SILENCE {nicknames}\n'.format(nicknames=' '.join(nicknames))
         line = utils.bytify(line)
@@ -676,8 +677,9 @@ class CommandMixin:
         return self.send(line)
 
 
-    def unsilence(self, *nicknames):
+    def unsilence(self, nickname, *nicknames):
         # only removes nicknames to ignore list, see silence to add
+        nicknames = nickname, *nicknames
         nicknames = map('-{}'.format, nicknames)
         line = 'SILENCE {nicknames}\n'.format(nicknames=' '.join(nicknames))
         line = utils.bytify(line)
@@ -699,8 +701,9 @@ class CommandMixin:
         return self.send(line)
 
 
-    def watch(self, *nicknames):
+    def watch(self, nickname, *nicknames):
         # only adds nicknames to watch list, see unwatch to remove
+        nicknames = nickname, *nicknames
         nicknames = map('+{}'.format, nicknames)
         line = 'WATCH {nicknames}\n'.format(nicknames=' '.join(nicknames))
         line = utils.bytify(line)
@@ -708,10 +711,18 @@ class CommandMixin:
         return self.send(line)
 
 
-    def unwatch(self, *nicknames):
+    def unwatch(self, nickname, *nicknames):
         # only removes nicknames to watch list, see watch to add
+        nicknames = nickname, *nicknames
         nicknames = map('-{}'.format, nicknames)
         line = 'WATCH {nicknames}\n'.format(nicknames=' '.join(nicknames))
         line = utils.bytify(line)
         
         return self.send(line)
+
+
+    # Convenience methods
+
+
+    def ban(self, nickname, *nicknames):
+        nicknames = nickname, *nicknames
