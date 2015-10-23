@@ -1,8 +1,29 @@
+import pkgutil
 import re
 import typing
 
 
 __all__ = ('lazyattribute', 'bytify', 're_partition')
+
+
+def load_plugins(path):
+    '''
+    Load all modules found in `path`.
+
+    Args:
+        path: The path of the specified directory to load.
+
+    Yields:
+        The loaded module object.
+    '''
+
+    for finder, name, is_package in pkgutil.walk_packages(path=[path]):
+        # `finder` is used to find a `loader` which can then load the package into memory
+        loader, _ = finder.find_loader(name)
+
+        module = loader.load_module()
+
+        yield module
 
 
 class lazyattribute:
@@ -136,10 +157,12 @@ def create_nickmask(seq):
 
         nick, user, host = match.groups()
 
-        mask = '{nick}!{user}@{host}'.format(nick=nick or PREFIX_WILDCARD,
-                                             user=user or PREFIX_WILDCARD,
-                                             host=host or PREFIX_WILDCARD)
-        mask = mask.replace('*', PREFIX_WILDCARD)
+        mask = r'{nick}!{user}@{host}'.format(nick=nick or PREFIX_WILDCARD,
+                                              user=user or PREFIX_WILDCARD,
+                                              host=host or PREFIX_WILDCARD)
+
+        # hosts often include periods, must be escaped
+        mask = mask.replace('.', '\.').replace('*', PREFIX_WILDCARD)
 
         ignored.append(mask)
 
