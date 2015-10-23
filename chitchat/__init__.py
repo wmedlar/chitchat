@@ -1,7 +1,7 @@
 from chitchat import cmd, num
+from chitchat.base import BaseClient
 from chitchat.irc import Message, ISUPPORT, supported, add_support
 from chitchat.mixins import BotMixin, CommandMixin
-from chitchat.structures import BaseClient
 
 
 class Client(BaseClient, CommandMixin):
