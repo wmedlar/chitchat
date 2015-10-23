@@ -3,7 +3,7 @@ import asyncio
 import collections
 
 
-from chitchat import irc
+from chitchat import irc, utils
 
 
 class AbstractClient(metaclass=abc.ABCMeta):
@@ -67,6 +67,9 @@ class BaseClient(AbstractClient):
         self.writer = None
 
         self.actions = collections.defaultdict(set)
+
+        # plugins is a set of module objects imported using the `BaseClient.load_plugins` method
+        self.plugins = set()
 
 
     @property
@@ -254,6 +257,34 @@ class BaseClient(AbstractClient):
             else:
                 # synchronous calls will block execution of asynchronous calls
                 yield from action(message)
+
+
+    def load_plugins(self, path):
+        '''
+        Locally imports all modules found in `path`.
+
+        This is a convenience method that is nearly equivalent to `from path import *`, however modules are loaded
+        into the namespace of the client instance.
+
+        Plugins are Python modules of helper code used to extend your client while keeping your project modular. For
+        instance a plugin directory may contain a file `pong.py` that includes a decorated (with the `on` decorator)
+        function to reply to every PING with a PONG.
+
+        Modules are executed when loaded, thus you should only use this method with a directory containing modules you
+        trust.
+
+        Args:
+            path: The string path to a directory containing Python modules to import.
+
+        Returns:
+            A tuple containing the modules imported.
+        '''
+        plugins = tuple(utils.load_plugins(path))
+
+        self.plugins.update(plugins)
+
+        return plugins
+
 
 
 if __name__ == '__main__':
