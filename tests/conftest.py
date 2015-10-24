@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import asyncio
 
 import pytest
@@ -77,3 +78,6 @@ class MockReader:
         self.read.append(val)
 
         return val
+=======
+
+>>>>>>> 7b02200f45383e1579d66f55e6ea6c4103885674
