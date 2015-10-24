@@ -144,6 +144,7 @@ def parse(message: str, pattern: typing.re.Pattern[str]):
         return None
 
 
+# a mapping of IRC server-supported features to callables that parse their parameters
 ISUPPORT = {
     'CASEMAPPING': str,
     'CHANLIMIT': utils.comma_delimited_many_to_one_mapping,
