@@ -15,3 +15,5 @@ Description! Maybe even a logo!
 - Come up with a logo
 - CTCP and IRCv3 support
 - Public API cleanup
+- Add line-splitting support for long (>512 char) messages with textwrap
+- Attempt to simplify module code with context managers and contextlib
