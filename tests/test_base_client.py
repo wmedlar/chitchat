@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-import pytest_asyncio
 
 from chitchat.base import BaseClient
 
@@ -119,3 +118,45 @@ def test_disconnect_not_connected(client):
     yield from client.disconnect()
 
     raise NotImplementedError('DISCONNECT trigger has not been implemented')
+
+
+@pytest.mark.asyncio
+def test_send(client):
+    '''
+    Test that `send` sends messages to the StreamWriter in the order they were received.
+    '''
+    yield from client.connect()
+
+    assert not client.writer.written
+
+    client.send(b'NICK Wiz\r\n')
+    client.send(b'USER guest 0 * :Ronnie Reagan\r\n')
+
+    assert client.writer.written == [b'NICK Wiz\r\n', b'USER guest 0 * :Ronnie Reagan\r\n']
+
+
+@pytest.mark.asyncio
+def test_async_iteration(client):
+    '''
+    Tests that async iteration over the StreamReader iterates over values in the order they were received.
+    '''
+
+    async def iterate():
+        async for line in client.reader:
+            pass
+
+    yield from client.connect()
+
+    assert not client.reader.read
+
+    client.reader.buffer = [
+        b':WiZ!jto@tolsun.oulu.fi NICK Kilroy\r\n',
+        b':syrk!kalt@millennium.stealth.net QUIT :Gone to have lunch\r\n'
+    ]
+
+    yield from asyncio.wait_for(iterate(), timeout=None)
+
+    assert client.reader.read == [
+        b':WiZ!jto@tolsun.oulu.fi NICK Kilroy\r\n',
+        b':syrk!kalt@millennium.stealth.net QUIT :Gone to have lunch\r\n'
+    ]
