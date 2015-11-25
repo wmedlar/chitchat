@@ -1,9 +1,10 @@
 import abc
 import asyncio
 import collections
+import itertools
 
 
-from chitchat import irc, utils
+from chitchat import utils
 
 
 class AbstractClient(metaclass=abc.ABCMeta):
@@ -33,24 +34,18 @@ class AbstractClient(metaclass=abc.ABCMeta):
 
 
     @abc.abstractmethod
-    def send(self, message):
-        pass
-
-
-    @abc.abstractmethod
     async def run(self):
         pass
 
 
     @asyncio.coroutine
     @abc.abstractmethod
-    def triggered_by(self, message):
+    def handle(self, line):
         pass
 
 
-    @asyncio.coroutine
     @abc.abstractmethod
-    def trigger(self, message):
+    def send(self, line):
         pass
 
 
@@ -65,11 +60,6 @@ class BaseClient(AbstractClient):
 
         self.reader = None
         self.writer = None
-
-        self.actions = collections.defaultdict(set)
-
-        # plugins is a set of module objects imported using the `BaseClient.load_plugins` method
-        self.plugins = set()
 
 
     @property
@@ -147,18 +137,7 @@ class BaseClient(AbstractClient):
         # yield from self.trigger('DISCONNECTED')
 
 
-    def send(self, message):
-
-        if not self.writer:
-            raise RuntimeError('connection is not ready')
-
-        # StreamWriter buffers and writes message asynchronously and returns None
-        self.writer.write(message)
-
-        return message
-
-
-    async def run(self) -> None:
+    async def run(self):
         '''
         The main method of the Client class, run within an event loop to connect to an IRC server and iterate over
         messages received.
@@ -170,124 +149,289 @@ class BaseClient(AbstractClient):
 
             # async for loop will yield a line as it is received
             async for line in self.reader:
-                # irc.Message object allows lazily-evaluated attribute access
-                # offers a speedup in some cases compared to eager evaluation of parameters
-                message = irc.Message(line.decode())
-
-                # async triggered actions will return immediately
-                # sync triggered actions will block until completion
-                await self.trigger(message)
+                await self.handle(line)
 
             # disconnect in the loop allows the client to reconnect without returning
             await self.disconnect()
 
 
-    def on(self, command: str, *commands, async=False):
+    @asyncio.coroutine
+    def handle(self, line):
         '''
-        A function decorator to register a listener called when a message of type `command` is received, with optional
-        blocking and nonblocking calls.
+        Message handler called by `BaseClient.run`. This method exists to be overridden in subclasses
+        and does nothing by default.
+        '''
 
-        The decorated function should take only one parameter, an irc.Message object containing lazily-parsed
-        parameters in its attributes.
+        pass
 
-        This decorator uses a function attribute to qualify a blocking or nonblocking call, thus the `async` attribute
-        of the function must be available to the decorator for use.
 
-        Args:
-            command: The string IRC command or three-digit numeric that will trigger the decorated function. At least
-                     one command is required.
-            *commands: Additional commands or numerics used to trigger the decorated function.
-            async: Boolean keyword-only argument used to specify that this function is to be run as nonblocking.
+    def send(self, line):
+        '''
+        Writes message to the transport stream asynchronously. This method is not a coroutine and
+        should not be yielded from.
 
-        Returns:
-            The decorated function wrapped in asyncio.coroutine.
+        args:
+            line: A bytes object representing the encoded string to write.
+
+        returns:
+            None
+
+        raises:
+            RuntimeError: Will be raised if the transport stream (self.writer) is falsey.
+        '''
+
+        if not self.writer:
+            raise RuntimeError('connection is not ready')
+
+        self.writer.write(line)
+
+
+class BotClient(BaseClient):
+
+
+    def __init__(self, host, port, *, encoding='UTF-8', ssl=True):
+        self.encoding = encoding
+
+        self.actions = collections.defaultdict(set)
+        self.parsers = {}
+        self.plugins = set()
+
+        super().__init__(host, port, ssl=ssl)
+
+
+    @asyncio.coroutine
+    def handle(self, line):
+        decoded = line.decode(self.encoding).rstrip('\r\n')
+
+        message = self.parse(decoded)
+
+        yield from self.trigger(message)
+
+
+    def parse(self, line):
+        '''
+        Parses an IRC-formatted line into a container object for further processing.
+
+        args:
+            line: A decoded string line representing the text to parse.
+
+        returns:
+            If the default or simple parser is used, this method will return a namedtuple instance with `prefix`,
+            `command`, and `params` attributes. Users may expand the `params` attribute with a simple parser into
+            several separate attributes.
+
+            If the user supplies their own complex parser, using the BotClient.parser decorator, this method will
+            return an arbitrary object that should implemented at least the `command` attribute.
+
+        raises:
+            TypeError: Will be raised if the parser is supplied with more arguments than its constructor can handle.
+        '''
+
+        prefix, command, params = utils.ircparse(line)
+
+        Parser = self.parsers.get(command, utils.Message)
+
+        if hasattr(Parser, '_fields') and Parser is not utils.Message:
+            fields = Parser._fields
+            params = prefix, command, *params
+
+            matched = [value for field, value in itertools.zip_longest(fields, params)]
+
+            try:
+                message = Parser._make(matched)
+
+            except TypeError:
+                matched = list(itertools.zip_longest(fields, params))
+                raise TypeError('too many parameters to parse: {} -> {}'.format(line, matched))
+
+        else:
+            message = Parser(prefix, command, params)
+
+        return message
+
+
+    @asyncio.coroutine
+    def trigger(self, message):
+        '''
+        Passes a message to a set of actions triggered by its various parameters. This method is a coroutine.
+
+        This method should not be called directly. If the user wants to mimic a received message
+        consider the `mimic` method instead.
+
+        args:
+            message: An object representing the message used to trigger a pre-defined action. This can be any object,
+                     usually a namedtuple instance, that implements a `command` attribute.
+
+        yields:
+            In the case that the triggered action is a blocking call, this method will yield its result. Otherwise this
+            method will return immediately upon calling the triggered actions.
+        '''
+
+        actions = self.actions[message.command]
+
+        for action in actions:
+
+            if not action.meets_requirements(message):
+                continue
+
+            if action.async:
+                asyncio.ensure_future(action.coro(message))
+
+            else:
+                yield from action.coro(message)
+
+
+    def parser(self, command, *commands):
+        '''
+        Decorator for user-generated parsers.
+
+        Parsers should take three arguments: a string prefix, a string command, and a list of parameters, and should
+        return an object with at least a 'command' attribute set to the command to be triggered.
         '''
 
         commands = command, *commands
 
         def wrapper(func):
-            '''
-            Wraps the decorated function in a coroutine and appends it to self.actions for each command passed.
 
-            Args:
-                func: The function to be decorated.
-
-            Returns:
-                The decorated function wrapped in asycio.coroutine.
-            '''
-
-            # function must be a coroutine to be yielded from
-            if not asyncio.iscoroutine(func):
-                func = asyncio.coroutine(func)
-
-            # async attribute is used in self.trigger to determine a blocking or nonblocking call
-            func.async = async
-
-            # allows multiple commands to trigger the function
             for command in commands:
-                # upper() ensures that triggers will not be missed from case-insensitivity
-                self.actions[command.upper()].add(func)
+                self.parsers.update({command: func})
 
             return func
 
         return wrapper
 
 
-    @asyncio.coroutine
-    def triggered_by(self, message):
-        '''This method is equivalent to `yield from self.actions[message.command]` and exists to be overridden.'''
-
-        actions = self.actions[message.command]
-
-        yield from actions
-
-
-    @asyncio.coroutine
-    def trigger(self, message):
-
-        actions = self.triggered_by(message)
-
-        for action in actions:
-
-            if action.async:
-                # asyncio.ensure_future schedules the tasks for execution
-                # tasks are then asynchronously executed in arbitrary order
-                asyncio.ensure_future(action(message))
-
-            else:
-                # synchronous calls will block execution of asynchronous calls
-                yield from action(message)
-
-
-    def load_plugins(self, path):
+    def simple_parser(self, command, *params, name='Message'):
         '''
-        Locally imports all modules found in `path`.
-
-        This is a convenience method that is nearly equivalent to `from path import *`, however modules are loaded
-        into the namespace of the client instance.
-
-        Plugins are Python modules of helper code used to extend your client while keeping your project modular. For
-        instance a plugin directory may contain a file `pong.py` that includes a decorated (with the `on` decorator)
-        function to reply to every PING with a PONG.
-
-        Modules are executed when loaded, thus you should only use this method with a directory containing modules you
-        trust.
-
-        Args:
-            path: The string path to a directory containing Python modules to import.
-
-        Returns:
-            A tuple containing the modules imported.
+        Registers a simple message container to a command.
         '''
-        plugins = tuple(utils.load_plugins(path))
 
-        self.plugins.update(plugins)
+        parser = collections.namedtuple(name, ('prefix', 'command') + params)
 
-        return plugins
+        self.parsers.update({command: parser})
 
+
+    def on(self, command, *commands, async=True, **kwargs):
+        '''
+        Action decorator.
+
+        args:
+            command, commands: String commands (e.g., 'NOTICE') or numerics (e.g., '003') used to trigger the
+                               decorated function. At least one command must be supplied.
+            async: A boolean signifying whether this function should be run asynchronously (non-blocking). This is a
+                   keyword-only argument that defaults to True.
+            kwargs: Any number of additional keyword arguments used to specify the requirements under which the
+                    decorated function should be called. For example, @BotClient.on('PRIVMSG', nick='chitchat') will
+                    only be triggered by a PRIVMSG from a user with a nick of 'chitchat', provided that you have
+                    defined a parser to populate the `nick` attribute of the message object received.
+
+        returns:
+            The decorated function.
+        '''
+
+        commands = command, *commands
+
+        def wrapper(func):
+
+            coro = func if asyncio.iscoroutine(func) else asyncio.coroutine(func)
+
+            @asyncio.coroutine
+            def wrapped(*args, **kwargs):
+
+                for line in coro(*args, **kwargs):
+
+                    self.send(line.encode())
+
+            action = utils.Action(wrapped, async, utils.requirements(kwargs))
+
+            for command in map(str.upper, commands):
+                self.actions[command].add(action)
+
+            return func
+
+        return wrapper
+
+
+    def command(self, trigger, *triggers, async=True, **kwargs):
+
+        triggers = trigger, *triggers
+
+        def func(text):
+            first, *_ = text.split(maxsplit=1)
+
+            return first in triggers
+
+        # func = lambda text: text.split()[0] in triggers
+
+        return self.on('PRIVMSG', async=async, text=func, **kwargs)
+
+
+
+# def load_plugins(self, path):
+#     '''
+#     Locally imports all modules found in `path`.
+#
+#     This is a convenience method that is nearly equivalent to `from path import *`, however modules are loaded
+#     into the namespace of the client instance.
+#
+#     Plugins are Python modules of helper code used to extend your client while keeping your project modular. For
+#     instance a plugin directory may contain a file `pong.py` that includes a decorated (with the `on` decorator)
+#     function to reply to every PING with a PONG.
+#
+#     Modules are executed when loaded, thus you should only use this method with a directory containing modules you
+#     trust.
+#
+#     Args:
+#         path: The string path to a directory containing Python modules to import.
+#
+#     Returns:
+#         A tuple containing the modules imported.
+#     '''
+#     plugins = tuple(utils.load_plugins(path))
+#
+#     self.plugins.update(plugins)
+#
+#     return plugins
 
 
 if __name__ == '__main__':
-    client = BaseClient(host='irc.rizon.net', port=6667, ssl=False)
+    from chitchat import num, cmd
+
+    client = BotClient(host='irc.rizon.net', port=6667, ssl=False)
+
+    client.simple_parser('NOTICE', 'target', 'text')
+    client.simple_parser('MODE', 'target', 'mode', 'params')
+    client.simple_parser('PING', 'target')
+    client.simple_parser('PRIVMSG', 'target', 'text')
+
+    @client.on(cmd.PING)
+    def pong(message):
+        yield 'PONG :' + message.target + '\r\n'
+
+    @client.on(cmd.NOTICE, text='*** Checking Ident')
+    def identify(message):
+        yield 'NICK Sakubot\r\n'
+        yield 'USER v3 0 * :bot.made.of.socks\r\n'
+
+    @client.on(cmd.NOTICE, text='please choose a different nick.')
+    def auth(message):
+        yield 'PRIVMSG NickServ :IDENTIFY SEA#$hark\r\n'
+
+    @client.on(cmd.MODE, mode='+r')
+    def join(message):
+        yield 'JOIN #sakubot\r\n'
+
+    @client.command('.rem')
+    def rem(message):
+        yield 'PRIVMSG ' + message.target + ' :You rolled a Sakuya!\r\n'
+
+    @client.command('.quit')
+    def quit(message):
+        yield from client.disconnect()
+
+    @client.on(*num.ALL, *cmd.ALL)
+    def log(message):
+        print(message)
+
     loop = asyncio.get_event_loop()
     loop.run_until_complete(client.run())

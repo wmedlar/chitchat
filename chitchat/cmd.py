@@ -6,10 +6,6 @@ See RFC 2812: https://tools.ietf.org/html/rfc2812#section-5
 '''
 
 
-def is_command(code: str) -> bool:
-    return code in ALL
-
-
 ADMIN = 'ADMIN'
 AWAY = 'AWAY'
 CNOTICE = 'CNOTICE'

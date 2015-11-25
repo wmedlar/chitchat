@@ -1,9 +1,53 @@
+import collections
 import pkgutil
 import re
 import typing
 
 
-__all__ = ('lazyattribute', 'bytify', 're_partition')
+Action = collections.namedtuple('Action', ['coro', 'async', 'meets_requirements'])
+Message = collections.namedtuple('Message', ['prefix', 'command', 'params'])
+
+
+def requirements(reqs):
+
+    def meets_requirements(_message_):
+
+        for key, value in reqs.items():
+
+            attr = getattr(_message_, key)
+
+            if callable(value) and value(attr):
+                continue
+
+            elif not callable(value) and value == attr:
+                continue
+
+            else:
+                return False
+
+        return True
+
+    return meets_requirements
+
+
+def ircparse(message):
+    '''
+    Parses an IRC message into its component prefix, command, and parameters.
+    '''
+
+    if message.startswith(':'):
+        prefix, message = message[1:].split(maxsplit=1)
+    else:
+        prefix = ''
+
+    # ' :' signifies the final parameter, which may contain any character except NUL ('\0') or CRLF ('\r\n')
+    # prior parameters may contain a colon if and only if it is not the first character
+    message, *trailing = message.split(' :', maxsplit=1)
+
+    # command is the first arg of message, remainder are concatenated with trailing into params
+    command, *params = *message.split(), *trailing
+
+    return prefix, command, params
 
 
 def load_plugins(path):
