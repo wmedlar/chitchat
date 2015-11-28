@@ -38,12 +38,10 @@ def rem(message):
     with sakubot.intercept('PRIVMSG', prefix=message.prefix, timeout=25) as future:
         try:
             msg = yield from future
-        except Exception as e:
-            print(e)
-            msg = None
+        except asyncio.TimeoutError:
+            return
     
-    if msg:
-        yield cc.privmsg(msg.target, 'You rolled a Sakuya!')
+    yield cc.privmsg(msg.target, 'You rolled a Sakuya!')
 
     
 if __name__ == '__main__':

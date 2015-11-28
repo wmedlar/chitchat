@@ -1,6 +1,28 @@
 # Chitchat: IRC for Robots
 Description! Maybe even a logo!
 
+## Writing an IRC bot has never been easier!
+```
+import asyncio
+import chitchat as cc
+
+bot = cc.Bot('your.favorite.server', port=6667)
+
+@bot.on(cc.CONNECTED)
+def bootup(message):
+    yield cc.identify(nick='Chitchat', user='v1', password='chitchatrocks!')
+    yield cc.join('#chitchatdev', '#mycoolchannel')
+    
+    
+@bot.command('!hello', target='#mycoolchannel')
+def hello(message):
+    yield cc.msg('Hello, ' + message.nick + '!', target=message.target)
+    
+loop = asyncio.get_event_loop()
+loop.run_until_complete(bot.run())
+```
+Pretty simple, right? Only a couple lines of code and you've already got yourself a bot that replies to a command. "But every IRC library does this", you might say. And you're right!
+
 ## Features
 - Asynchronous Commands: so your long-running housekeeping tasks won't disrupt your bot's service!
 - Simple, Pythonic API: with Chitchat everything is right where you expect it!
