@@ -1,19 +1,36 @@
-# Chitchat: IRC for Robots
-Description! Maybe even a logo!
+# Chitchat: IRC for Bots that Get Stuff Done
+Writing an IRC bot has never been easier!
+``` Python
+import asyncio
+import chitchat as cc
 
-## Features
-- Asynchronous Commands: so your long-running housekeeping tasks won't disrupt your bot's service!
-- Simple, Pythonic API: with Chitchat everything is right where you expect it!
-- Vast Extensability: there's nothing your Chitchat bot can't do!
+bot = cc.Bot('your.favorite.server', port=6667)
+
+@bot.on(cc.CONNECTED)
+def bootup(message):
+    yield cc.identify(nick='Chitchat', user='v1', password='chitchatrocks!')
+    yield cc.join('#chitchatdev', '#mycoolchannel')
+    
+@bot.command('!hello', target='#mycoolchannel')
+def hello(message):
+    yield cc.reply('Hello, ' + message.nick + '!')
+    
+loop = asyncio.get_event_loop()
+loop.run_until_complete(bot.run())
+```
+Pretty simple, right? Only a handful of lines of code and you've already got yourself a reactive bot!
+
+"Hmph! Every IRC library does this!", you might say, you ol' grump. But where Chitchat outshines its competitors isn't only in simple "hello, world" scripts, but in complicated, high-functioning bots that Get Stuff Done.
+``` Python
+some neat code
+```
+Check out the docs for more information. If you're in need of some inspiration, take a look at our collection of real-world examples!
 
 ## Todo
 - Test coverage and more documentation
-- Unify and simplify internal handling of CommandMixin methods
-- Add numeric support for all large IRC networks, currently only supporting Freenode on top of RFC-defined numerics
-- Deprecate Client class, I'm all about bots now
+- Add numeric support for all large IRC networks; currently only supporting Freenode on top of RFC-defined numerics
 - Add logging support
-- Come up with a logo
 - CTCP and IRCv3 support
 - Public API cleanup
 - Add line-splitting support for long (>512 char) messages with textwrap
-- Attempt to simplify module code with context managers and contextlib
+- Release!
