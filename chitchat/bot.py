@@ -208,15 +208,24 @@ class SimpleBot(BaseClient):
             coro = func if asyncio.iscoroutine(func) else asyncio.coroutine(func)
 
             @asyncio.coroutine
-            def wrapped(*args, **kwargs):
+            def wrapped(message):
 
-                for line in coro(*args, **kwargs):
+                # iterate over lines yielded
+                for line in coro(message):
                     
+                    # coroutines (like asyncio.sleep) must be yielded from
+                    # or we'll get a nasty traceback
                     if isinstance(line, (asyncio.Future, asyncio.Task)):
                         yield from line
+                        continue
+                    
+                    # a partial PRIVMSG that is only missing its `target` kwarg
+                    elif isinstance(line, functools.partial):
+                        target = utils.reply_to(message.target)
+                        line = line(target=target)
                 
-                    else:
-                        self.send(line.encode(self.encoding))
+                    # a regular, good ol'-fashioned string
+                    self.send(line.encode(self.encoding))
 
             # namedtuple wrapper Action makes for cleaner code
             action = utils.Action(wrapped, async, utils.requirements(kwargs))
