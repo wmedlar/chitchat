@@ -1,5 +1,5 @@
 # Chitchat: IRC for Bots that Get Stuff Done
-## Writing an IRC bot has never been easier!
+Writing an IRC bot has never been easier!
 ``` Python
 import asyncio
 import chitchat as cc
