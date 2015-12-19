@@ -6,6 +6,7 @@ import itertools
 
 from chitchat import constants, utils
 from chitchat.client import BaseClient
+from chitchat.decorator import on
 
 
 class SimpleBot(BaseClient):
@@ -58,19 +59,17 @@ class SimpleBot(BaseClient):
         decoded = line.decode(self.encoding).rstrip('\r\n')
 
         command, message = self.parse(decoded)
-        
-        print(message)
 
         yield from self.trigger(command, message)
 
 
     def parse(self, line):
-        '''
+        """
         Parses an IRC-formatted line into a container object for further processing.
 
         args:
             line: A string line representing the text to parse.
-        '''
+        """
 
         prefix, command, params = utils.ircparse(line)
         
@@ -81,7 +80,7 @@ class SimpleBot(BaseClient):
 
     @asyncio.coroutine
     def trigger(self, command, message=None):
-        '''
+        """
         Passes a message to a set of actions triggered by its various parameters. This
         method is a coroutine.
 
@@ -94,7 +93,7 @@ class SimpleBot(BaseClient):
             In the case that the triggered action is a blocking call, this method will
             yield its result. Otherwise this method will return immediately upon calling
             the triggered actions.
-        '''
+        """
 
         actions = self.actions[command]
 
@@ -177,12 +176,18 @@ class SimpleBot(BaseClient):
         func = functools.partial(parse, fields)
 
         self.parsers.update({command: func})
+        
+    
+    # def on(self, command, *commands, async=True, **requirements):
+    #     
+    #     return on(self, command, *commands, async=async, **requirements)
+    
 
 
     def on(self, command, *commands, async=True, **kwargs):
-        '''
+        """
         Action decorator.
-
+    
         args:
             commands: String commands (e.g., 'NOTICE') or numerics (e.g., '003') used to
                       trigger the decorated function. At least one command must be
@@ -195,21 +200,21 @@ class SimpleBot(BaseClient):
                     requirements under which the decorated function should be called.
                     For example, @SimpleBot.on('PRIVMSG', nick='chitchat') will only be
                     triggered by a PRIVMSG from a user with a nick of 'chitchat'.
-
+    
         returns:
             The decorated function.
-        '''
-
+        """
+    
         commands = command, *commands
-
+    
         def wrapper(func):
-
+    
             # coerces func into a coroutine so it can be yielded from
             coro = func if asyncio.iscoroutine(func) else asyncio.coroutine(func)
-
+    
             @asyncio.coroutine
             def wrapped(message):
-
+    
                 # iterate over lines yielded
                 for line in coro(message):
                     
@@ -226,16 +231,16 @@ class SimpleBot(BaseClient):
                 
                     # a regular, good ol'-fashioned string
                     self.send(line.encode(self.encoding))
-
+    
             # namedtuple wrapper Action makes for cleaner code
             action = utils.Action(wrapped, async, utils.requirements(kwargs))
-
+    
             # ensure commands are uppercase for proper triggering
             for command in map(str.upper, commands):
                 self.actions[command].add(action)
-
+    
             return func
-
+    
         return wrapper
 
 
@@ -258,6 +263,36 @@ class SimpleBot(BaseClient):
         # func = lambda text: text.split()[0] in triggers
 
         return self.on(constants.PRIVMSG, async=async, text=func, **kwargs)
+    
+    
+    @asyncio.coroutine
+    def intercept(self, command, *commands, timeout=None, **kwargs):
+        """
+        Intecepts and returns a received message.
+        """
+        
+        commands = command, *commands
+        del command
+        
+        # queue will house the single message we receive
+        queue = asyncio.Queue(maxsize=1)
+        
+        def interceptor(message):
+            """
+            An action, wrapped in Bot.on, used to intercept a single message and prevent
+            it from triggering other actions.
+            """
+            # we only want to intercept one message, so check if the queue is full first
+            if queue.full():
+                return
+            
+            yield from queue.put(message)
+            
+        # with self.on()
+            
+            
+        
+    
     
     
     @contextlib.contextmanager
@@ -289,14 +324,17 @@ class SimpleBot(BaseClient):
         
         # wait_for must be wrapped in a Task to ensure it yields a future if
         # a timeout is passed
-        task = asyncio.ensure_future(asyncio.wait_for(queue.get(), timeout))
+        # task = asyncio.ensure_future(asyncio.wait_for(queue.get(), timeout))
+        task = yield from asyncio.wait_for(queue.get(), timeout)
+        
+        print(task)
 
         try:
-            yield from task
+            return task
             
-        except asyncio.TimeoutError as e:
+        except asyncio.TimeoutError:
             task.cancel()
-            raise e
+            raise
             
         finally:
             for command in map(str.upper, commands):

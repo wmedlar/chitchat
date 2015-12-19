@@ -61,4 +61,5 @@ target/
 .idea/
 
 # Sakubot
-sakubot*
+sakubot.py
+*sakubot*
