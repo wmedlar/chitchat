@@ -60,6 +60,9 @@ target/
 # PyCharm
 .idea/
 
+# Pyenv
+.python-version
+
 # Sakubot
 sakubot.py
 *sakubot*
