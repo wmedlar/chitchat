@@ -10,10 +10,6 @@ bot = cc.Bot('your.favorite.server', port=6667)
 def bootup(message):
     yield cc.identify(nick='Chitchat', user='v1', password='chitchatrocks!')
     yield cc.join('#chitchatdev', '#mycoolchannel')
-    
-@bot.command('!hello', target='#mycoolchannel')
-def hello(message):
-    yield cc.msg('Hello, ' + message.nick + '!', target=message.target)
 
 @bot.command('!hello', target='#mycoolchannel')
 def hello(message):
