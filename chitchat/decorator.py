@@ -1,76 +1,51 @@
-import asyncio
 import functools
 import inspect
-import weakref
+import types
 
-from chitchat import utils
+from . import utils
 
-class on:
+
+class callback:
+    """
+    Decorator for functions to trigger on receiving a specified command.
     
-    def __init__(self, obj, command, *commands, async=True, **requirements):
-        self.obj = weakref.ref(obj)
-        self.commands = {cmd.upper() for cmd in (command, *commands)}
-        self.async = async
-        self.reqs = requirements
+    Attributes:
+        handle: An awaitable function called to handle lines yielded or returned by the decorated function.
+        register: A function called to register the decorated function with the listener. It should accept the decorated function as its only argument.
+        requirements: A boolean-returning callable designed to compare the attributes of a message container to specified values.
+    """
+    
+    def __init__(self, handler, registrar, **attrs):
+        self.handle = handler
+        self.register = registrar
+        self.requirements = utils.require(False, **attrs)
+        
     
     def __call__(self, func):
-        # must be a coroutine so it can be yielded from
-        func = func if asyncio.iscoroutine(func) else asyncio.coroutine(func)
+        
+        # async def functions, must be awaited
+        coro = inspect.iscoroutinefunction(func)
         
         @functools.wraps(func)
-        @asyncio.coroutine
-        def wrapped(message):
+        async def wrapper(*args, **kwargs):
             
-            obj = self.obj()
+            # ignore any call that does not meet the requirements
+            if not self.requirements(*args, **kwargs):
+                return
             
-            if obj is None:
-                raise Exception('does not exist anymore')
-            
-            coro = func(message)
-            
-            for line in coro:
+            if coro:
+                lines = await func(*args, **kwargs)
+            else:
+                lines = func(*args, **kwargs)
                 
-                print(repr(line), type(line))
-                
-                # yielding from Future and Task instances allows us to chain coroutines
-                # and use functions such as `asyncio.sleep`
-                if isinstance(line, asyncio.Future) or inspect.isgenerator(line):
-                    line = yield from asyncio.wait_for(line, None)
-                    
-                    if line is None:
-                        continue
-                 
-                # functools.partial is used for `reply` magic
-                elif isinstance(line, functools.partial):
-                    target = utils.target(message.target)
-                    line = line(target=target)
+            if not lines:
+                return
             
-                encoded = line.encode(obj.encoding)
-                obj.send(encoded)
+            await self.handle(lines)
             
-        action = utils.Action(wrapped, self.async, utils.requirements(self.reqs))
+        # register the function with the listener
+        self.register(wrapper)
         
-        self._add(action)            
-        
-        return wrapped
-        
-    def _add(self, action):
-        obj = self.obj()
-        
-        if obj is None:
-            raise Exception('does not exist anymore')
-        
-        for command in self.commands:
-            actions = obj.actions[command]
-            actions.add(action)
-        
+        # return the original function so this decorator can be chained
+        return func
     
-    def _remove(self, action):
-        obj = self.obj()
-        
-        if obj is None:
-            raise Exception('does not exist anymore')
-        
-        for command in self.commands:
-            actions = obj.actions[command]
-            actions.remove(action)
