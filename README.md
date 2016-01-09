@@ -1,7 +1,6 @@
 # Chitchat: IRC for Bots that Get Stuff Done
 Writing an IRC bot has never been easier!
 ``` Python
-import asyncio
 import chitchat as cc
 
 bot = cc.Bot('your.favorite.server', port=6667)
@@ -15,8 +14,8 @@ def bootup(message):
 def hello(message):
     yield cc.reply('Hello, ' + message.nick + '!')
 
-loop = asyncio.get_event_loop()
-loop.run_until_complete(bot.run())
+if __name__ == '__main__':
+    bot.start()
 ```
 
 "Hmph! Every IRC library does this!", you might say, you ol' grump. But where Chitchat outshines its competitors isn't only in simple "hello, world" scripts, but in complicated, high-functioning bots that Get Stuff Done.
