@@ -6,13 +6,13 @@ import chitchat as cc
 bot = cc.Bot('your.favorite.server', port=6667)
 
 @bot.on('CONNECTED')
-def bootup(message):
+def bootup(*args):
     yield cc.identify(nick='Chitchat', user='v1', password='chitchatrocks!')
     yield cc.join('#chitchatdev', '#mycoolchannel')
 
-@bot.command('!hello', target='#mycoolchannel')
-def hello(message):
-    yield cc.reply('Hello, ' + message.nick + '!')
+@bot.command('!hello')
+def hello(prefix, command, target, message):
+    yield cc.privmsg(target, 'Hello, ' + prefix.nick + '!')
 
 if __name__ == '__main__':
     bot.start()
