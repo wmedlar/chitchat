@@ -6,6 +6,14 @@ See RFC 2812: https://tools.ietf.org/html/rfc2812#section-5
 See Freenode: https://github.com/freenode/ircd-seven/blob/837efa08a938099c105d055abb67779d021d83e5/include/numeric.h
 '''
 
+# constants used in utils
+CRLF = '\r\n'
+MAXLEN = 512
+
+# pseudo-commands
+CONNECTED = 'CONNECTED'
+DISCONNECTED = 'DISCONNECTED'
+
 # IRC commands in alphabetical order
 
 ADMIN = 'ADMIN'
