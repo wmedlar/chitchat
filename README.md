@@ -5,7 +5,7 @@ import chitchat as cc
 
 bot = cc.Bot('your.favorite.server', port=6667)
 
-@bot.on(cc.CONNECTED)
+@bot.on('CONNECTED')
 def bootup(message):
     yield cc.identify(nick='Chitchat', user='v1', password='chitchatrocks!')
     yield cc.join('#chitchatdev', '#mycoolchannel')
