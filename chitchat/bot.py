@@ -26,7 +26,9 @@ class Client(Connection):
         # see utils.ircsplit
         prefix, command, params = utils.ircsplit(decoded)
         
-        triggered = await self.trigger(command=command, prefix, command, *params)
+        # command is here twice so that it is passed to the appropriate listeners
+        # while maintaining the generality of `self.trigger`'s function signature
+        triggered = await self.trigger(command, prefix, command, *params)
         
         return triggered
     
@@ -76,7 +78,7 @@ class Client(Connection):
         listeners = self.listeners[command]
         
         # schedule the triggered coroutines to be executed
-        tasks = [asyncio.ensure_future(coro(*args, **kwargs)) for listener in listeners]
+        tasks = [asyncio.ensure_future(listener(*args, **kwargs)) for listener in listeners]
         
         return tasks
     
