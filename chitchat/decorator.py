@@ -12,29 +12,22 @@ class callback:
     Attributes:
         handle: An awaitable function called to handle lines yielded or returned by the decorated function.
         register: A function called to register the decorated function with the listener. It should accept the decorated function as its only argument.
-        requirements: A boolean-returning callable designed to compare the attributes of a message container to specified values.
     """
     
-    def __init__(self, handler, registrar, **attrs):
+    def __init__(self, handler, registrar):
         self.handle = handler
         self.register = registrar
-        self.requirements = utils.require(False, **attrs)
         
     
     def __call__(self, func):
-        
-        # async def functions, must be awaited
-        coro = inspect.iscoroutinefunction(func)
+        awaitable = inspect.iscoroutinefunction(func)
         
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
             
-            # ignore any call that does not meet the requirements
-            if not self.requirements(*args, **kwargs):
-                return
-            
-            if coro:
+            if awaitable:
                 lines = await func(*args, **kwargs)
+                
             else:
                 lines = func(*args, **kwargs)
                 

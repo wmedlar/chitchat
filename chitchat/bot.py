@@ -36,9 +36,6 @@ class Client(Connection):
     def on(self, command, **kwargs):
         """
         Decorator for functions to trigger on receiving a specified type of message.
-        
-        Kwargs is a dict of arbitrary requirements to trigger functions based on the
-        attributes of the receieved message.
         """
         
         # the method called to handle lines returned by the callback
@@ -47,7 +44,7 @@ class Client(Connection):
         # method called to register the callback with the listener
         registrar = functools.partial(self.register, command)
         
-        return decorator.callback(handler, registrar, **kwargs)
+        return decorator.callback(handler, registrar)
     
     
     def register(self, command, func):
