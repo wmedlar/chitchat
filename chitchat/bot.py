@@ -1,14 +1,9 @@
 import asyncio
 import collections
 import functools
-import inspect
-import operator
-import types
 
 from .connection import Connection
-from . import constants
-from .decorator import callback
-from .utils import ircsplit, require
+from . import constants, decorator, utils
 
 
 class Client(Connection):
@@ -16,9 +11,8 @@ class Client(Connection):
     
     def __init__(self, host, port, *, encoding='UTF-8', ssl=True):
         super().__init__(host, port, encoding=encoding, ssl=ssl)
-    
-        self.containers = {}
-        self.triggers = collections.defaultdict(set)
+
+        self.listeners = collections.defaultdict(set)
     
     
     async def handle(self, line):
@@ -30,18 +24,9 @@ class Client(Connection):
         decoded = line.decode(self.encoding).rstrip(constants.CRLF)
         
         # see utils.ircsplit
-        prefix, command, params = ircsplit(decoded)
+        prefix, command, params = utils.ircsplit(decoded)
         
-        # converts the recieved message into a namedtuple object with attribute access
-        # see structures.Message
-        # message = Message(*prefix, command, params)
-        
-        Container = self.containers.get(command, lambda *a: a)
-        
-        message = Container(prefix, command, params)
-        
-        # trigger relevant functions
-        triggered = await self.trigger(command, message)
+        triggered = await self.trigger(command=command, prefix, command, *params)
         
         return triggered
     
@@ -60,7 +45,7 @@ class Client(Connection):
         # method called to register the callback with the listener
         registrar = functools.partial(self.register, command)
         
-        return callback(handler, registrar, **kwargs)
+        return decorator.callback(handler, registrar, **kwargs)
     
     
     def register(self, command, func):
@@ -68,9 +53,9 @@ class Client(Connection):
         Adds a function to the client's set of triggers.
         """
         
-        self.triggers[command].add(func)
+        self.listeners[command].add(func)
             
-        return self.triggers
+        return self.listeners
     
     
     def start(self, loop=None):
@@ -83,30 +68,21 @@ class Client(Connection):
         loop.close()
     
     
-    async def trigger(self, command, message=None):
+    async def trigger(self, command, *args, **kwargs):
         """
-        Passes message to triggered functions.
+        Passes parsed arguments to any registered listeners.
         """
         
-        coros = self.triggers[command]
+        listeners = self.listeners[command]
         
         # schedule the triggered coroutines to be executed
-        tasks = [asyncio.ensure_future(coro(message)) for coro in coros]
+        tasks = [asyncio.ensure_future(coro(*args, **kwargs)) for listener in listeners]
         
         return tasks
     
     
 class Bot(Client):
     
-    
-    def command(self, trigger, *, case_sensitive=False, **kwargs):
-        
-        decorator = self.on(constants.PRIVMSG,
-                            case_sensitive=case_sensitive,
-                            text=operator.methodcaller('startswith', trigger),
-                            **kwargs)
-        
-        return decorator
-    
+    pass
     
     
