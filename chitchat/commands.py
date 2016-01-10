@@ -7,26 +7,94 @@ from chitchat import constants, utils
 
 
 def pass_(password):
+    """
+    Builds a PASS command used to set a connection password. The optional password can and
+    must be set before any attempt to register the connection is made (i.e., before
+    sending a NICK/USER combination).
     
-    return utils.format(constants.PASS, password)
+    args:
+        password: A spaceless string representing the connection password.
+        
+    returns:
+        An unencoded string representing the PASS command.
+    """
+    
+    return utils.ircjoin(constants.PASS, password)
 
 
 def nick(nickname):
+    """
+    Builds a NICK command used to give or change a user's nickname.
     
-    return utils.format(constants.NICK, nickname)
-
-
-def user(user, realname, mode=0, unused='*'):
+    args:
+        nickname: A spaceless string representing the user's desired nickname.
+        
+    returns:
+        An unencoded string representing the NICK command.
+    """
     
-    return utils.format(constants.USER, user, mode, unused, realname, spaced=True)
+    return utils.ircjoin(constants.NICK, nickname)
 
 
-def oper(name, password):
+def user(username, name=None, mode=0, unused='*'):
+    """
+    Builds a USER command used at the beginning of a connection to specify the username,
+    mode, and real name of a new user.
     
-    return utils.format(constants.OPER, name, password)
+    args:
+        user: A spaceless string representing the user's username.
+        name: A string representing the user's real name. This optional parameter may
+              contain spaces. If this parameter is None, it will be the same as the `user`
+              parameter.
+        mode: An integer, or string representing an integer, used to specify the user mode
+              set when registering with the server. This optional parameter defaults to 0
+              to signify no user mode.
+        unused: This field is unused in the IRC specification and is included for
+                completeness.
+    
+    returns:
+        An unencoded string representing the USER command.
+    """
+    
+    if name is None:
+        name = username
+    
+    return utils.ircjoin(constants.USER, username, mode, unused, spaced=name)
+
+
+def oper(username, password):
+    """
+    Builds an OPER command used to obtain server operator privileges.
+    
+    args:
+        username: A spaceless string representing the username to register with.
+        password: A spaceless string representing the password to register with.
+        
+    returns:
+        An unencoded string representing the OPER command.
+    """
+    
+    return utils.ircjoin(constants.OPER, username, password)
+
+
+def mode(*args):
+    """
+    Builds a MODE command used to modify user or channel modes.
+    
+    args:
+    
+    returns:
+        An unencoded string representing the MODE command.
+    """
+    
+    raise NotImplemented
+
 
 
 def service(nickname, info, distribution='*', type=0, reserved='*'):
+    """
+    
+    """
     
     return utils.format(constants.SERVICE, nickname, reserved, distribution,
                         type, reserved, info, spaced=True)
@@ -430,3 +498,18 @@ def unwatch(nickname, *nicknames):
     formatted = ['-{}'.format(nick) for nick in nicknames]
     
     return utils.format(constants.WATCH, *formatted)
+
+
+# convenience functions so users don't have to be intimate with IRC spec to run a bot
+
+def identify(nickname, username, password=None):
+    """
+    Registers a user with the server. This function is a generator, and should either be
+    returned or yielded from.
+    """
+
+    if password is not None:
+        yield pass_(password)
+    
+    yield nick(nickname)
+    yield user(username)
