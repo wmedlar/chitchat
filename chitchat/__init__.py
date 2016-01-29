@@ -1,3 +1,3 @@
-from chitchat import constants
-from chitchat.bot import SimpleBot
-from chitchat.commands import *
+from . import constants
+from .bot import Client
+from .commands import *
