@@ -1,44 +1,90 @@
 import collections
+import functools
 import itertools
 import pkgutil
 import re
 import textwrap
 
 
-Action = collections.namedtuple('Action', ['coro', 'async', 'meets_requirements'])
-Message = collections.namedtuple('Message', ['prefix', 'command', 'params'])
+from . import constants
 
 
-def requirements(reqs):
+def require(case_sensitive=False, **attrs):
     """
-    Converts a dict of message requirements into a callable used to determine whether
-    subsequent messages meet those requirements.
+    Creates a boolean-returning function that compares the attributes defined by
+    the keys in kwargs to the values, which can also be callables.
     """
 
-    def meets_requirements(message):
+    reqs = set()
+    
+    for attr, value in attrs.items():
+        
+        if callable(value):
+            f = lambda m: value(getattr(m, attr))
+        
+        if case_sensitive:
+            f = lambda m: _case_insensitive_equal(getattr(m, attr), value)
+            
+        else:
+            f = lambda m: getattr(m, attr) == value
+            
+        reqs.add(f)
+    
 
-        for key, value in reqs.items():
-
-            attr = getattr(message, key)
-
-            if callable(value) and value(attr):
-                continue
-
-            elif not callable(value) and value == attr:
-                continue
-
-            else:
-                return False
-
-        return True
-
-    return meets_requirements
+    def func(*a, **kw):
+        
+        return all(f(*a, **kw) for f in reqs)
+        
+    func._as_dict = attrs
+    
+    return func
 
 
-def ircparse(message):
-    '''
+def _case_insensitive_equal(a, b):
+    """
+    Case-insensitively compares strings a and b.
+    """
+    
+    try:
+        lowa, lowb = a.lower(), b.lower()
+        
+    except AttributeError:
+        # one of our args is likely None
+        return False
+    
+    return lowa == lowb
+
+
+def ircjoin(*args, spaced=None):
+    """
+    Joins a command with its arguments into a valid IRC message.
+    
+    args:
+        command: A string representing the command of the message.
+        args: Variable number of positional args, formatted in the order they were passed.
+        spaced: Keyword-only argument specifying a parameter that allows spaces.
+        
+    returns:
+        A string representing the formatted message.
+    """
+    
+    # waiting for f-strings
+    format_list = ['{}'] * len(args)
+    
+    if spaced:
+        format_list.append(':{}')
+    
+    line = ' '.join(format_list)
+    
+    return line.format(*args, spaced) + CRLF
+
+
+# not cached as messages are unlikely to be repeated exactly
+# thus caching would just be a waste of memory
+def ircsplit(message):
+    """
     Parses an IRC message into its component prefix, command, and parameters.
-    '''
+    """
 
     if message.startswith(':'):
         prefix, message = message[1:].split(maxsplit=1)
@@ -56,50 +102,45 @@ def ircparse(message):
     return prefix, command, params
 
 
-def format(command, *args, spaced=False):
-    '''
-    Formats a bunch of args into a valid IRC message.
+# prefixes, on the other hand, are repeated often
+# caching should speed up construction of structures.prefix objects
+@functools.lru_cache()
+def prefixsplit(prefix):
+    """
+    Parses an IRC prefix into its component nick, user, and host.
     
     args:
-        command: A string representing the command of the message.
-        args: Variable number of positional args, formatted in the order they were passed.
-        spaced: Keyword-only boolean specifying whether the last parameter allows for spaces.
-        
+        prefix: A string representing the IRC prefix to parse.
+    
     returns:
-        A string representing the formatted message.
-    '''
-    
-    CRLF = '\r\n'
-    
-    # isolate last, possibly spaced arg
-    *args, last = command, *args
-    
-    # colon delimiter represents an arg that allows spaces
-    line = '{} ' * len(args) + (':{}' if spaced else '{}')
-    
-    return line.format(*args, last) + CRLF
-
-
-def container(name, fields, *, cache={}):
-    """
-    Caches containers created by `Client.simple_parser` method.
-    
-    args:
-        name: string
-        fields: tuple
-        
-    returns:
-        cached container or new container
+        A tuple containing the parsed nick, user, and host, in that order.
     """
     
-    # using cache as a mutable default arg allows it to persist
-    container = cache.get((name, fields))
+    if not prefix:
+        return None, None, None
     
-    if not container:
-        container = collections.namedtuple(name, fields)
-        cache.update({(name, fields): container})
+    try:
+        nick, prefix = prefix.split('!', maxsplit=1)
+    
+    except ValueError:
+        nick = None
         
-    return container
+    try:
+        user, host = prefix.split('@', maxsplit=1)
+    
+    except ValueError:
+        nick = prefix if nick is None else nick
+        user = None if nick == prefix else prefix
+        host = None
+        
+    return nick, user, host
+
+
+def ascallable(command, host, nick, user, target, text):
+    """
+    Creates a callable of message requirements.
+    """
+    pass
 
 
 def load_plugins(path):
@@ -120,3 +161,9 @@ def load_plugins(path):
         module = loader.load_module()
 
         yield module
+        
+        
+def prep(message, encoding):
+    """Prepares a message for writing by adding a newline and encoding."""
+    line = '{}\r\n'.format(message)
+    return line.encode(encoding)
