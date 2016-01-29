@@ -7,12 +7,12 @@ bot = cc.Bot('your.favorite.server', port=6667)
 
 @bot.on('CONNECTED')
 def bootup(*args):
-    yield cc.identify(nick='Chitchat', user='v1', password='chitchatrocks!')
+    yield cc.identify(nick='Chitchat', user='v1a', password='chitchatrocks!')
     yield cc.join('#chitchatdev', '#mycoolchannel')
 
 @bot.command('!hello')
 def hello(prefix, command, target, message):
-    yield cc.privmsg(target, 'Hello, ' + prefix.nick + '!')
+    return cc.privmsg(target, 'Hello, ' + prefix.nick + '!')
 
 if __name__ == '__main__':
     bot.start()
@@ -29,9 +29,10 @@ Check out the docs for more information. If you're in need of some inspiration, 
 
 ## Todo
 - Test coverage and more documentation
-- Add numeric support for all large IRC networks; currently only supporting Freenode on top of RFC-defined numerics
-- Add logging support
+- Numerics support for all large IRC networks; currently only supporting Freenode on top of RFC-defined numerics
+- Logging support
 - CTCP and IRCv3 support
 - Public API cleanup
-- Add line-splitting support for long (>512 char) messages with textwrap
+- Line-splitting support for long (>512 char) messages with textwrap
+- Client.wait_for to intercept server replies
 - Release!
