@@ -35,4 +35,5 @@ Check out the docs for more information. If you're in need of some inspiration, 
 - Public API cleanup
 - Line-splitting support for long (>512 char) messages with textwrap
 - Client.wait_for to intercept server replies
+- Plugin support completely separated from Client instances
 - Release!
