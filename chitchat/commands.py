@@ -36,14 +36,14 @@ def nick(nickname):
     return utils.ircjoin(constants.NICK, nickname)
 
 
-def user(username, name=None, mode=0, unused='*'):
+def user(username, realname=None, mode=0, unused='*'):
     """
     Builds a USER command used at the beginning of a connection to specify the username,
     mode, and real name of a new user.
     
     args:
-        user: A spaceless string representing the user's username.
-        name: A string representing the user's real name. This optional parameter may
+        username: A spaceless string representing the user's username.
+        realname: A string representing the user's real name. This optional parameter may
               contain spaces. If this parameter is None, it will be the same as the `user`
               parameter.
         mode: An integer, or string representing an integer, used to specify the user mode
@@ -56,10 +56,10 @@ def user(username, name=None, mode=0, unused='*'):
         An unencoded string representing the USER command.
     """
     
-    if name is None:
-        name = username
+    if realname is None:
+        realname = username
     
-    return utils.ircjoin(constants.USER, username, mode, unused, spaced=name)
+    return utils.ircjoin(constants.USER, username, mode, unused, spaced=realname)
 
 
 def oper(username, password):
@@ -77,122 +77,126 @@ def oper(username, password):
     return utils.ircjoin(constants.OPER, username, password)
 
 
-def mode(*args):
+def mode(target, *params):
     """
     Builds a MODE command used to modify user or channel modes.
     
     args:
+        target: A spaceless string representing the nick or channel to modify.
+        *params: Mode parameters.
     
     returns:
         An unencoded string representing the MODE command.
     """
-    
-    raise NotImplemented
 
+    return utils.ircjoin(constants.MODE, target, *params)
 
 
 def service(nickname, info, distribution='*', type=0, reserved='*'):
     """
+    Builds a SERVICE command used to register a new service.
     
+    args:
+        nickname: A spaceless string representing the service's desired nickname.
+        info: A string description of the service; may contain spaces.
+        distribution: A spaceless string representing the server mask specifying the
+                      visibility of the service.
+        type: Currently unused and reserved for future use; included for completeness.
+        reserved: Currently unused and reserved for future use; included for completness.
+        
+    returns:
+        An unencoded string representing the SERVICE command.
     """
     
-    return utils.format(constants.SERVICE, nickname, reserved, distribution,
-                        type, reserved, info, spaced=True)
+    return utils.ircjoin(constants.SERVICE, nickname, reserved, distribution, type, 0,
+                         spaced=info)
 
 
 def quit(message=None):
+    """
+    Builds a QUIT command used to terminate a client session.
     
-    if message is None:
-        return utils.format(constants.QUIT)
+    args:
+        message: A string comment to leave upon quitting; may contain spaces.
+        
+    returns:
+        An unencoded string representing the QUIT command.
+    """
     
-    return utils.format(constants.QUIT, message, spaced=True)
+    return utils.ircjoin(constants.QUIT, spaced=message)
 
 
 def squit(server, message):
+    """
+    Builds a SQUIT command used to disconnect server links. This command is only available
+    to operators.
     
-    return utils.format(constants.SQUIT, server, message, spaced=True)
+    args:
+        server: A spaceless string representing the server to disconnect.
+        message: A string reason for disconnecting the server; may contain spaces.
+        
+    returns:
+        An unencoded string representing the SQUIT command.
+    """
+    
+    return utils.ircjoin(constants.SQUIT, server, spaced=message)
 
 
-def join(channel, *channels, keys=None):
-    channels = channel, *channels
+# can't use **kwargs for channel=key pairings because channels begin with symbols
+def join(*channels, keys=None):
+    """
+    Builds a JOIN command used to request joining a channel.
+    
+    args:
+        *channels: Any number of string channels to join.
+        keys: If supplied keys should be an iterable of channel keys that map to channels.
+        
+    returns:
+        An unencoded string representing the JOIN command.
+    """
     
     if keys is None:
-        channels = ','.join(channels)        
-        return utils.format(constants.JOIN, channels)
+        
+        return utils.ircjoin(constants.JOIN, ','.join(channels))
     
     channels, keys = zip(*itertools.zip_longest(channels, keys, fillvalue=''))
-    
-    channels = ','.join(channels)
-    keys = ','.join(keys)
-    
-    return utils.format(constants.JOIN, channels, keys)
+
+    return utils.ircjoin(constants.JOIN, ','.join(channels), ','.join(keys))
 
 
-def part(channel, *channels, message=None):
+def part(*channels, message=None):
     
-    channels = channel, *channels
-    channels = ','.join(channels)
-    
-    if message is None:
-        return utils.format(constants.PART, channels)
-    
-    return utils.format(constants.PART, channels, message, spaced=True)
-
-
-def mode(target, mode, *params):
-    
-    return utils.format(constants.MODE, target, mode, *params)
+    return utils.ircjoin(constants.PART, ','.join(channels), spaced=message)
 
 
 def topic(channel, topic=None):
     
-    if topic is None:
-        return utils.format(constants.TOPIC, channel)
-    
-    return utils.format(constants.TOPIC, channel, topic, spaced=True)
+    return utils.ircjoin(constants.TOPIC, channel, spaced=topic)
 
 
-def names(channel, *channels, target=None):
+def names(*channels, server=None):
     
-    channels = channel, *channels
-    channels = ','.join(channels)
-    
-    if target is None:
-        return utils.format(constants.NAMES, channels)
-    
-    return utils.format(constants.NAMES, channels, target)
+    return utils.ircjoin(constants.NAMES, ','.join(channels), server)
 
 
-def list(channel, *channels, target=None):
+def list(*channels, server=None):
     
-    channels = channel, *channels
-    channels = ','.join(channels)
-    
-    if target is None:
-        return utils.format(constants.LIST, channels)
-    
-    return utils.format(constants.LIST, channels, target)
+    return utils.ircjoin(constants.LIST, ','.join(channels), server)
 
 
 def invite(nickname, channel):
     
-    return utils.format(constants.INVITE, nickname, channel)
+    return utils.ircjoin(constants.INVITE, nickname, channel)
 
 
-def kick(channel, nickname, *nicknames, message=None):
+def kick(channel, *nicknames, message=None):
     
-    nicknames = nickname, *nicknames
-    nicknames = ','.join(nicknames)
-    
-    if message is None:
-        return utils.format(constants.KICK, channel, nicknames)
-    
-    return utils.format(constants.KICK, channel, nicknames, message, spaced=True)
+    return utils.ircjoin(constants.KICK, channel, ','.join(nicknames), spaced=message)
 
 
 def privmsg(target, message):
     
-    return utils.format(constants.PRIVMSG, target, message, spaced=True)
+    return utils.ircjoin(constants.PRIVMSG, target, spaced=message)
 
 
 # name shortened for convenience
@@ -201,122 +205,122 @@ msg = privmsg
 
 def notice(target, message):
     
-    return utils.format(constants.NOTICE, target, message, spaced=True)
+    return utils.ircjoin(constants.NOTICE, target, spaced=message)
 
 
-def motd(target=None):
+def motd(server=None):
     
-    if target is None:
-        return utils.format(constants.MOTD)
+    if server is None:
+        return utils.ircjoin(constants.MOTD)
     
-    return utils.format(constants.MOTD, target)
+    return utils.ircjoin(constants.MOTD, server)
 
 
-def lusers(mask='', target=None):
+def lusers(mask='', server=None):
     
-    if target is None:
-        return utils.format(constants.LUSERS, mask)
+    if server is None:
+        return utils.ircjoin(constants.LUSERS, mask)
     
-    return utils.format(constants.LUSERS, mask, target)
+    return utils.ircjoin(constants.LUSERS, mask, server)
 
 
-def version(target=None):
+def version(server=None):
     
-    if target is None:
-        return utils.format(constants.VERSION)
+    if server is None:
+        return utils.ircjoin(constants.VERSION)
     
-    return utils.format(constants.VERSION, target)
+    return utils.ircjoin(constants.VERSION, server)
 
 
-def stats(query='', target=None):
+def stats(query='', server=None):
     
-    if target is None:
-        return utils.format(constants.STATS, query)
+    if server is None:
+        return utils.ircjoin(constants.STATS, mask)
     
-    return utils.format(constants.STATS, query, target)
+    return utils.ircjoin(constants.STATS, query, server)
 
 
-def links(mask='', target=None):
+def links(mask='', server=None):
     
-    if target is None:
-        return utils.format(constants.LINKS, mask)
+    if server is None:
+        return utils.ircjoin(constants.LINKS, mask)
     
-    return utils.format(constants.LINKS, mask, target)
+    return utils.ircjoin(constants.LINKS, mask, server)
 
 
-def time(target=None):
+def time(server=None):
     
-    if target is None:
-        return utils.format(constants.TIME)
+    if server is None:
+        return utils.ircjoin(constants.TIME)
     
-    return utils.format(constants.TIME, target)
+    return utils.ircjoin(constants.TIME, server)
 
 
-def connect(target, port, remote=None):
+def connect(server, port, remote=None):
     
     if remote is None:
-        return utils.format(constants.CONNECT, target, port)
+        return utils.ircjoin(constants.CONNECT, server, port)
     
-    return utils.format(constants.CONNECT, target, port, remote)
+    return utils.ircjoin(constants.CONNECT, server, port, remote)
 
 
-def trace(target=None):
+def trace(server=None):
     
-    if target is None:
-        return utils.format(constants.TRACE)
+    if server is None:
+        return utils.ircjoin(constants.TRACE)
     
-    return utils.format(constants.TRACE, target)
+    return utils.ircjoin(constants.TRACE, server)
 
 
-def admin(target=None):
+def admin(server=None):
     
-    if target is None:
-        return utils.format(constants.ADMIN)
+    if server is None:
+        return utils.ircjoin(constants.ADMIN)
     
-    return utils.format(constants.ADMIN, target)
+    return utils.ircjoin(constants.ADMIN, server)
 
 
-def info(target=None):
+def info(server=None):
     
-    if target is None:
-        return utils.format(constants.INFO)
+    if server is None:
+        return utils.ircjoin(constants.INFO)
     
-    return utils.format(constants.INFO, target)
+    return utils.ircjoin(constants.INFO, server)
 
 
 def servlist(mask='', type=None):
     
     if type is None:
-        return utils.format(constants.SERVLIST, mask)
+        return utils.ircjoin(constants.SERVLIST, mask)
     
-    return utils.format(constants.SERVLIST, mask, type)
+    return utils.ircjoin(constants.SERVLIST, mask, type)
 
 
 def squery(target, message):
     
-    return utils.format(constants.SQUERY, target, message, spaced=True)
+    return utils.ircjoin(constants.SQUERY, target, spaced=message)
 
 
-def who(mask='', op_only=False):
+def who(mask='', ops_only=False):
     
-    if op_only:
-        return utils.format(constants.WHO, mask, 'o')
+    if ops_only:
+        return utils.ircjoin(constants.WHO, mask, 'o')
     
-    return utils.format(constants.WHO, mask)
+    return utils.ircjoin(constants.WHO, mask)
 
 
-def whois(mask, *masks, target=None):
-    masks = mask, *masks
+def whois(*masks, server=None):
+
     masks = ','.join(masks)
     
-    if target is None:
-        return utils.format(constants.WHOIS, masks)
+    if server is None:
+        return utils.ircjoin(constants.WHOIS, masks)
     
-    return utils.format(constants.WHOIS, target, masks)
+    return utils.ircjoin(constants.WHOIS, server, masks)
 
 
-def whowas(nickname, *nicknames, count=None, target=None):
-    nicknames = nickname, *nicknames
+def whowas(*nicknames, count=None, server=None):
+
     nicknames = ','.join(nicknames)
     
     args = [constants.WHOWAS, nicknames]
@@ -324,95 +328,86 @@ def whowas(nickname, *nicknames, count=None, target=None):
     if count is not None:
         args.append(count)
         
-    if target is not None:
+    if server is not None:
         args.append(target)
         
-    return utils.format(*args)
+    return utils.ircjoin(*args)
 
 
 def kill(nickname, message):
     
-    return utils.format(constants.KILL, nickname, message, spaced=True)
+    return utils.ircjoin(constants.KILL, nickname, spaced=message)
 
 
-def ping(target):
+def ping(server):
     
-    return utils.format(constants.PING, target, spaced=True)
+    return utils.ircjoin(constants.PING, server)
 
 
-def pong(target):
+def pong(server):
     
-    return utils.format(constants.PONG, target, spaced=True)
+    return utils.ircjoin(constants.PONG, server)
 
 
 def error(message):
     
-    return utils.format(constants.ERROR, message, spaced=True)
+    return utils.ircjoin(constants.ERROR, spaced=message)
 
 
 def away(message=None):
     
-    if message is None:
-        return utils.format(constants.AWAY)
-    
-    return utils.format(constants.AWAY, message, spaced=True)
+    return utils.ircjoin(constants.AWAY, spaced=message)
 
 
 def rehash():
     
-    return utils.format(constants.REHASH)
+    return utils.ircjoin(constants.REHASH)
 
 
 def die():
     
-    return utils.format(constants.DIE)
+    return utils.ircjoin(constants.DIE)
 
 
 def restart():
     
-    return utils.format(constants.RESTART)
+    return utils.ircjoin(constants.RESTART)
 
 
-def summon(user, target=None, channel=None):
+def summon(user, server=None, channel=None):
     
     args = [constants.SUMMON, user]
     
-    if target is not None:
-        args.append(target)
+    if server is not None:
+        args.append(server)
         
     if channel is not None:
         args.append(channel)
         
-    return utils.format(*args)
+    return utils.ircjoin(*args)
 
 
-def users(target=None):
+def users(server=None):
     
-    if target is None:
-        return utils.format(constants.USERS)
+    if server is None:
+        return utils.ircjoin(constants.USERS)
         
-    return utils.format(constants.USERS, target)
+    return utils.ircjoin(constants.USERS, target)
 
 
 def wallops(message):
     
-    return utils.format(constants.WALLOPS, message, spaced=True)
+    return utils.ircjoin(constants.WALLOPS, spaced=message)
 
 
-def userhost(nickname, *nicknames):
+def userhost(*nicknames):
     
-    nicknames = nickname, *nicknames
-    nicknames = ' '.join(nicknames)
-    
-    return utils.format(constants.USERHOST, nicknames)
+    return utils.ircjoin(constants.USERHOST, ' '.join(nicknames))
 
 
-def ison(nickname, *nicknames):
+def ison(*nicknames):
     
-    nicknames = nickname, *nicknames
-    nicknames = ' '.join(nicknames)
-    
-    return utils.format(constants.ISON, nicknames)
+    return utils.ircjoin(constants.ISON, ' '.join(nicknames))
 
 
 # Non-RFC-defined commands in alphabetical order
@@ -420,96 +415,85 @@ def ison(nickname, *nicknames):
 
 def cnotice(nickname, channel, message):
     
-    return utils.format(constants.CNOTICE, nickname, channel, message, spaced=True)
+    return utils.ircjoin(constants.CNOTICE, nickname, channel, spaced=message)
 
 
 def cprivmsg(nickname, channel, message):
     
-    return utils.format(constants.CPRIVMSG, nickname, channel, message, spaced=True)
+    return utils.ircjoin(constants.CPRIVMSG, nickname, channel, spaced=message)
 
 
 def help():
     
-    return utils.format(constants.HELP)
+    return utils.ircjoin(constants.HELP)
 
 
 def knock(channel, message=None):
     
-    if message is None:
-        return utils.format(constants.KNOCK, channel)
-    
-    return utils.format(constants.KNOCK, channel, message, spaced=True)
+    return utils.ircjoin(constants.KNOCK, channel, spaced=message)
 
 
 def namesx():
     
-    return utils.format(constants.NAMESX)
+    return utils.ircjoin(constants.NAMESX)
 
 
 def rules():
     
-    return utils.format(constants.RULES)
+    return utils.ircjoin(constants.RULES)
 
 
 def setname(realname):
     
-    return utils.format(constants.SETNAME, realname, spaced=True)
+    return utils.ircjoin(constants.SETNAME, spaced=realname)
 
 
-def silence(nickname, *nicknames):
+def silence(*nicknames):
     # only adds nicknames to ignore list, see unsilence to remove
-    nicknames = nickname, *nicknames
     formatted = ['+{}'.format(nick) for nick in nicknames]
     
-    
-    return utils.format(constants.SILENCE, *formatted)
+    return utils.ircjoin(constants.SILENCE, *formatted)
 
 
-def unsilence(nickname, *nicknames):
+def unsilence(*nicknames):
     # only removes nicknames to ignore list, see silence to add
-    nicknames = nickname, *nicknames
     formatted = ['-{}'.format(nick) for nick in nicknames]
     
-    
-    return utils.format(constants.SILENCE, *formatted)
+    return utils.ircjoin(constants.SILENCE, *formatted)
 
 
 def uhnames():
     
-    return utils.format(constants.UHNAMES)
+    return utils.ircjoin(constants.UHNAMES)
 
 
 def userip(nickname):
     
-    return utils.format(constants.USERIP, nickname)
+    return utils.ircjoin(constants.USERIP, nickname)
 
 
-def watch(nickname, *nicknames):
+def watch(*nicknames):
     # only adds nicknames to watch list, see unwatch to remove
-    nicknames = nickname, *nicknames
     formatted = ['+{}'.format(nick) for nick in nicknames]
     
-    return utils.format(constants.WATCH, *formatted)
+    return utils.ircjoin(constants.WATCH, *formatted)
 
 
-def unwatch(nickname, *nicknames):
+def unwatch(*nicknames):
     # only removes nicknames to watch list, see watch to add
-    nicknames = nickname, *nicknames
     formatted = ['-{}'.format(nick) for nick in nicknames]
     
-    return utils.format(constants.WATCH, *formatted)
+    return utils.ircjoin(constants.WATCH, *formatted)
 
 
 # convenience functions so users don't have to be intimate with IRC spec to run a bot
 
 def identify(nickname, username, password=None):
     """
-    Registers a user with the server. This function is a generator, and should either be
-    returned or yielded from.
+    Registers a user with the server. Convenience function that wraps `pass`, `nick`, and
+    `user` in the correct order. This function returns one string containing three commands.
     """
-
-    if password is not None:
-        yield pass_(password)
     
-    yield nick(nickname)
-    yield user(username)
+    lines = '' if password is None else pass_(password), nick(nickname), user(username)
+
+    return ''.join(lines)
