@@ -10,12 +10,12 @@ def bootup(*args):
     yield cc.identify(nick='Chitchat', user='v1a', password='chitchatrocks!')
     yield cc.join('#chitchatdev', '#mycoolchannel')
 
-@bot.command('!hello')
+@bot.on(text='!hello')
 def hello(prefix, command, target, message):
     return cc.privmsg(target, 'Hello, ' + prefix.nick + '!')
 
 if __name__ == '__main__':
-    bot.start()
+    bot.run()
 ```
 
 "Hmph! Every IRC library does this!", you might say, you ol' grump. But where Chitchat outshines its competitors isn't only in simple "hello, world" scripts, but in complicated, high-functioning bots that Get Stuff Done.
