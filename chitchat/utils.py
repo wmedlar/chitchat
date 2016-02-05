@@ -9,52 +9,6 @@ import textwrap
 from . import constants
 
 
-def require(case_sensitive=False, **attrs):
-    """
-    Creates a boolean-returning function that compares the attributes defined by
-    the keys in kwargs to the values, which can also be callables.
-    """
-
-    reqs = set()
-    
-    for attr, value in attrs.items():
-        
-        if callable(value):
-            f = lambda m: value(getattr(m, attr))
-        
-        if case_sensitive:
-            f = lambda m: _case_insensitive_equal(getattr(m, attr), value)
-            
-        else:
-            f = lambda m: getattr(m, attr) == value
-            
-        reqs.add(f)
-    
-
-    def func(*a, **kw):
-        
-        return all(f(*a, **kw) for f in reqs)
-        
-    func._as_dict = attrs
-    
-    return func
-
-
-def _case_insensitive_equal(a, b):
-    """
-    Case-insensitively compares strings a and b.
-    """
-    
-    try:
-        lowa, lowb = a.lower(), b.lower()
-        
-    except AttributeError:
-        # one of our args is likely None
-        return False
-    
-    return lowa == lowb
-
-
 def ircjoin(*args, spaced=None):
     """
     Joins a command with its arguments into a valid IRC message.
@@ -76,7 +30,7 @@ def ircjoin(*args, spaced=None):
     
     line = ' '.join(format_list)
     
-    return line.format(*args, spaced) + CRLF
+    return line.format(*args, spaced) + constants.CRLF
 
 
 # not cached as messages are unlikely to be repeated exactly
@@ -117,34 +71,47 @@ def prefixsplit(prefix):
     """
     
     if not prefix:
-        return None, None, None
+        return '', '', ''
     
     try:
         nick, prefix = prefix.split('!', maxsplit=1)
     
     except ValueError:
-        nick = None
+        nick = ''
         
     try:
         user, host = prefix.split('@', maxsplit=1)
     
     except ValueError:
-        nick = prefix if nick is None else nick
-        user = None if nick == prefix else prefix
-        host = None
+        # probably from a server, convention is to set the prefix as host
+        user = ''
+        host = prefix if not nick else ''
         
     return nick, user, host
 
 
-def ascallable(command, host, nick, user, target, text):
+def ascallable(chan=None, host=None, nick=None, user=None, text=None):
     """
     Creates a callable of message requirements.
     """
+    
+    # message.target in chan
+    # chan=[] to restrict to private messages only
+    # host == message.host
+    # nick == message.nick
+    # user == message.user
+    # text == message.text
+    
+    return None
+
+def _compare(*args):
+    
     pass
+    
 
 
 def load_plugins(path):
-    '''
+    """
     Load all modules found in `path`.
 
     Args:
@@ -152,7 +119,7 @@ def load_plugins(path):
 
     Yields:
         The loaded module object.
-    '''
+    """
 
     for finder, name, is_package in pkgutil.walk_packages(path=[path]):
         # `finder` is used to find a `loader` which can then load the package into memory
@@ -161,9 +128,3 @@ def load_plugins(path):
         module = loader.load_module()
 
         yield module
-        
-        
-def prep(message, encoding):
-    """Prepares a message for writing by adding a newline and encoding."""
-    line = '{}\r\n'.format(message)
-    return line.encode(encoding)
