@@ -23,58 +23,29 @@ class Connection:
                                                                  loop=self.loop, **kwargs)
         
         self.connected = True
-        host_ip, host_port = self.writer.get_extra_info('peername')
-        
-        # pseudocommand signifying a successful connection
-        line = utils.ircjoin(':' + host_ip, constants.CONNECTED, host_port).encode(self.encoding)
-        
-        # feed the pseudocommand to the StreamReader
-        self.reader.feed_data(line)
+        self._connected_message()
 
 
     async def disconnect(self):
         """Disconnect from server."""
 
         self.connected = False
-        host_ip, host_port = self.writer.get_extra_info('peername')
-
-        # pseudocommand signifying a closed or lost connection from the server
-        line = utils.ircjoin(':' + host_ip, constants.DISCONNECTED, host_port).encode(self.encoding)
-        
-        # iteration over the reader has stopped, so we'll send this one to self.handle
-        await self.handle(line)
+        self._disconnected_message()
     
 
     async def handle(self, line):
         """
-        Message handler called by `self.run`. This method exists to be overridden in
-        subclasses and does nothing by default.
+        This method exists to be overridden in subclasses and does nothing by default.
         """
+
+        # TODO: subclass asyncio.Protocol to send data to handle as it is received
 
         pass
 
 
-    async def run(self):
+    async def send(self, lines):
         """
-        The main method of the Connection class, run within an event loop to connect to an
-        IRC server and iterate over messages received.
-        """
-
-        await self.connect()
-
-        while self.connected:
-            
-            async for line in self.reader:
-                
-                await self.handle(line)
-
-            # disconnect inside the loop allows the client to reconnect without returning
-            await self.disconnect()
-
-
-    def send(self, lines):
-        """
-        Prepares and writes messages to the connected server.
+        Buffers and writes messages to the connected server.
 
         args:
             lines: An iterable of string or bytes objects representing the messages to
@@ -82,12 +53,35 @@ class Connection:
 
         returns:
             None
-
-        raises:
-            RuntimeError: Will be raised if the transport stream is closed.
         """
-
-        if not self.writer:
-            raise RuntimeError('connection is not ready')
         
         self.writer.write(lines)
+        
+    
+    def _connected_message(self):
+        # networks will redirect connections to lower-load servers
+        # this will get the actual host (ip, port) connected to
+        host, port = self.writer.get_extra_info('peername')
+        
+        # :<HOST> CONNECTED <PORT>
+        line = utils.ircjoin(':' + host, constants.CONNECTED, port).encode(self.encoding)
+        
+        # feed the pseudocommand to the StreamReader
+        # allows it to be the first line read when async iterated over
+        self.reader.feed_data(line)
+        
+    
+    def _disconnected_message(self):
+        # networks will redirect connections to lower-load servers
+        # this will get the actual host (ip, port) that we had connected to
+        # just in case we want to reconnect to that specific server
+        host, port = self.writer.get_extra_info('peername')
+
+        # :<HOST> DISCONNECTED <PORT>
+        line = utils.ircjoin(':' + host, constants.DISCONNECTED, port).encode(self.encoding)
+        
+        # can't feed data to the reader after it has received eof (which signals disconnect)
+        # send this one directly to the handle method
+        asyncio.ensure_future(self.handle(line))
+    
+    
