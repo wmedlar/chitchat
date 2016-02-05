@@ -28,12 +28,13 @@ if __name__ == '__main__':
 Check out the docs for more information. If you're in need of some inspiration, take a look at our collection of real-world examples!
 
 ## Todo
-- Test coverage and more documentation
-- Numerics support for all large IRC networks; currently only supporting Freenode on top of RFC-defined numerics
-- Logging support
-- CTCP and IRCv3 support
-- Public API cleanup
-- Line-splitting support for long (>512 char) messages with textwrap
-- Client.wait_for to intercept server replies
-- Plugin support completely separated from Client instances
-- Release!
+- [ ] Test coverage and more documentation
+- [ ] Numerics support for all large IRC networks; currently only supporting Freenode on top of RFC-defined numerics
+- [ ] Logging support
+- [ ] CTCP and IRCv3 support
+- [ ] Public API cleanup
+- [ ] Line-splitting support for long (>512 char) messages with textwrap
+- [ ] event scheduler decorator using asyncio.BaseEventLoop.call_at and call_later
+- [ ] Client.wait_for to intercept server replies
+- [ ] Plugin support completely separated from Client instances
+- [ ] Release!
