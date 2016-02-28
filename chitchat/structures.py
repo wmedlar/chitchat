@@ -48,7 +48,7 @@ class CaseInsensitiveDefaultDict(collections.abc.MutableMapping):
         """Supports non-string keys."""
         
         try:
-            return key.upper()
+            return key.casefold()
         
         except AttributeError:
             return key
