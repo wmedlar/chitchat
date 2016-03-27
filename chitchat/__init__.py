@@ -1,3 +1,2 @@
-from . import constants
-from .bot import Client
+from .client import Client
 from .commands import *
