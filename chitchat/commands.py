@@ -1,7 +1,7 @@
 import asyncio
 import itertools
 
-from chitchat import constants, utils
+from . import constants, utils
 
 # RFC-defined commands in order of definition in RFC 2812
 
@@ -191,7 +191,10 @@ def invite(nickname, channel):
 
 def kick(channel, *nicknames, message=None):
     
-    return utils.ircjoin(constants.KICK, channel, ','.join(nicknames), spaced=message)
+    repeater = itertools.repeat(channel, len(nicknames))
+    channels = ','.join(repeater)
+    
+    return utils.ircjoin(constants.KICK, channels, ','.join(nicknames), spaced=message)
 
 
 def privmsg(target, message):

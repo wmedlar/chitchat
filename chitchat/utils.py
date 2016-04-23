@@ -33,8 +33,6 @@ def ircjoin(*args, spaced=None):
     return line.format(*args, spaced) + constants.CRLF
 
 
-# not cached as messages are unlikely to be repeated exactly
-# thus caching would just be a waste of memory
 def ircsplit(message):
     """
     Parses an IRC message into its component prefix, command, and parameters.
@@ -56,9 +54,6 @@ def ircsplit(message):
     return prefix, command, params
 
 
-# prefixes, on the other hand, are repeated often
-# caching should speed up construction of structures.prefix objects
-@functools.lru_cache()
 def prefixsplit(prefix):
     """
     Parses an IRC prefix into its component nick, user, and host.
@@ -83,48 +78,157 @@ def prefixsplit(prefix):
         user, host = prefix.split('@', maxsplit=1)
     
     except ValueError:
-        # probably from a server, convention is to set the prefix as host
+        # probably from the host server
         user = ''
         host = prefix if not nick else ''
         
     return nick, user, host
 
 
-def ascallable(chan=None, host=None, nick=None, user=None, text=None):
+def ischannel(chanstring, prefixes=None):
     """
-    Creates a callable of message requirements.
+    Attempts to verify the validity of a channel string according to grammar defined
+    in IRC spec.
+    
+    Per RFC 2812 (Section 1.3) channel names are strings prefixed with '&', '#', '+',
+    or '!' of length up to fifty characters. Channel names may not contain spaces,
+    control G characters (\\x07), or commas.
+    
+    args:
+        chanstring: str to verify
+        prefixes: iterable of valid str channel prefixes, defaults to ('&', '#', '+', '!')
+        
+    returns:
+        bool describing whether `chanstring` is likely a channel
     """
     
-    # message.target in chan
-    # chan=[] to restrict to private messages only
-    # host == message.host
-    # nick == message.nick
-    # user == message.user
-    # text == message.text
+    # str.startswith only accepts strings or tuples of strings, no lists
+    prefixes = tuple(prefixes) if prefixes else ('&', '#', '+', '!')
+    max_len = 50
+    restricted = {' ', '\x07', ','}
     
-    return None
-
-def _compare(*args):
+    return (chanstring.startswith(prefixes) and
+            len(chanstring) <= max_len and
+            not restricted.intersection(chanstring))
     
-    pass
     
+def as_comparable(arg):
+    
+    # allow user to define their own behavior
+    if callable(arg):
+        return arg
+    
+    # allow all, don't create callable
+    elif arg is None or isinstance(arg, bool):
+        return boolean(arg)
+    
+    # strings or bytes
+    # bytes are decoded by Client implementation, but are included here for completeness
+    elif isinstance(arg, (bytes, str)):
+        return equality(arg, case_sensitive=False)
+    
+    # lists, tuples, generators
+    elif isinstance(arg, collections.abc.Iterable):
+        return containment(arg, case_sensitive=False)
+    
+    # try our best
+    else:
+        return equality(arg)
+        
 
-
-def load_plugins(path):
+def boolean(a):
     """
-    Load all modules found in `path`.
+    Creates a function that accepts one argument and returns the boolean value of `a`.
+    
+    >>> true = boolean(True)
+    >>> true('abc')
+    True
+    >>> true(False)
+    True
+    
+    args:
+        a: value of any type to be interpreted as a boolean
+        
+    returns:
+        function of one argument that returns the boolean value of `a`
+    
+    """
+    
+    bool_a = bool(a)
+    
+    def func(b):
+        
+        return bool_a
+    
+    doc = 'Always returns the boolean value of {0}'
+    func.__doc__ = doc.format(a)
+    
+    return func
+    
+    
+def equality(a, case_sensitive=True):
+    """
+    Creates a function that accepts one argument and returns whether that argument is
+    equal to `a`.
+    
+    >>> 
+    
+    args:
+        a: value of any type for comparison
+        case_sensitive: bool; if False this will attempt to call str.casefold on both
+                        `a` and the argument passed to the returned function before
+                        equality comparison
+    
+    returns:
+        function of one argument for comparison testing to `a`
+        
+    """
+    
+    try:
+        lower_a = a.casefold()
+    
+    except AttributeError:
+        lower_a = a
 
-    Args:
-        path: The path of the specified directory to load.
+    def func(b):
+        
+        if not case_sensitive:
+            
+            try:
+                return lower_a == b.casefold()
+            
+            except AttributeError:
+                pass
+            
+        return a == b
+    
+    doc = 'Tests for case-{0}sensitive equality with {1!r}.'
+    func.__doc__ = doc.format('' if case_sensitive else 'in', a)
+    
+    return func
 
-    Yields:
-        The loaded module object.
+
+def casefold_each(iterable):
+    """
+    Casefolds each item in `iterable`, skipping items that don't implement a `casefold`
+    method.
+    
+    If `iterable` is a string, return a casefolded copy of that string, otherwise
+    return a copy of `iterable` with each item casefolded.
     """
 
-    for finder, name, is_package in pkgutil.walk_packages(path=[path]):
-        # `finder` is used to find a `loader` which can then load the package into memory
-        loader, _ = finder.find_loader(name)
-
-        module = loader.load_module()
-
-        yield module
+    if isinstance(iterable, str):
+        return iterable.casefold()
+    
+    folded = []
+    for item in iterable:
+        
+        try:
+            i = item.casefold()
+            
+        except AttributeError:
+            i = item
+            
+        folded.append(i)
+        
+    return folded

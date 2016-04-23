@@ -1,87 +1,141 @@
+import abc
 import asyncio
 
-from . import constants, utils
+from . import constants, structures, utils
 
-# TODO: move Connection.run to Client
 
-class Connection:
+class IRCProtocol(asyncio.Protocol):
     
     
-    def __init__(self, *, encoding='UTF-8', loop=None):
-        self.encoding = encoding
+    def __init__(self, client, loop=None):
+        self.client = client
         self.loop = loop or asyncio.get_event_loop()
         
-        self.connected = False
-        self.reader = None
-        self.writer = None
+        self.buffer = bytearray()
+    
+    
+    def connection_lost(self, exc):
+        coro = self.client.disconnect(exc=exc)
+        self.loop.create_task(coro)
+    
+    
+    def data_received(self, data):
         
+        self.buffer.extend(data)
+        
+        try:
+            # splits the buffer at the rightmost newline
+            # new buffer will be empty if a full line is received
+            lines, self.buffer = self.buffer.rsplit(b'\n', maxsplit=1)
+            
+        except ValueError:
+            # buffer is only part of a single line
+            # wait to receive more data before passing this to the client
+            return
+        
+        for line in lines.splitlines():
+            self.client.handle(line)
+    
+    
+    def eof_received(self):
+        pass
+        
+        
+class AsyncConnection:
+    """
+    An asynchronous connection object for reading from and writing to an IRC server.
+    """
+    
+    EXIT = object()
+    
+    
+    def __init__(self, encoding, loop):
+        self.encoding = encoding
+        self.loop = loop
+        
+        # override in subclass for some form of flood control?
+        self.queue = asyncio.Queue(maxsize=0, loop=loop)
+        
+        self.transport = None
+        self.protocol = None
+        
+        
+    def protocol_factory(self):
+        """
+        Factory function for creating IRCProtocol instances.
+        """
+        return IRCProtocol(client=self, loop=self.loop)  
+    
     
     async def connect(self, host, port, **kwargs):
-        """Open a connection to the host."""
+        """
+        Connect to a remote `host` on port `port`. Additional kwargs are passed to
+        `asyncio.BaseEventLoop.create_connection`.
         
-        self.reader, self.writer = await asyncio.open_connection(host, port,
-                                                                 loop=self.loop, **kwargs)
+        Triggers functions decorated with @chitchat.on('CONNECTED').
+        """
         
-        self.connected = True
-        self._connected_message()
-
-
-    async def disconnect(self):
-        """Disconnect from server."""
-
-        self.connected = False
-        self._disconnected_message()
-    
-
-    async def handle(self, line):
+        # don't store the host, port, etc. as attributes to make
+        # it clear that they can't be changed while connected
+        
+        self.transport, self.protocol = await self.loop.create_connection(
+            self.protocol_factory, host, port, **kwargs
+        )
+        
+        self.loop.create_task(self._run())
+        
+        
+    async def disconnect(self, exc=None):
         """
-        This method exists to be overridden in subclasses and does nothing by default.
-        """
-
-        # TODO: subclass asyncio.Protocol to send data to handle as it is received
-
-        pass
-
-
-    async def send(self, lines):
-        """
-        Buffers and writes messages to the connected server.
-
+        Cleans up the transport after disconnecting from the remote host and stops the
+        event loop.
+        
+        Triggers functions decorated with @chitchat.on('DISCONNECTED') with the remote
+        host and port, and any exception propagated from the server.
+        
         args:
-            lines: An iterable of string or bytes objects representing the messages to
-            write.
-
-        returns:
-            None
+            exc: Exception propagated from the transport. This exception is passed as
+                 the last argument to any function triggered.
         """
         
-        self.writer.write(lines)
+        # let the queue know it ought to stop, otherwise it would
+        # block until it received another message that will never come
+        await self.queue.put(AsyncConnection.EXIT)
+        await self.queue.join()
+        
+        self.transport = None
+        self.protocol = None
+        
+        
+    async def send(self, line):
+        """Schedules a line to be sent to the host server."""
+        
+        # strings have to be encoded before sending
+        if isinstance(line, str):
+            line = line.encode(self.encoding)
+        
+        # queue implemented for flood control
+        await self.queue.put(line)
         
     
-    def _connected_message(self):
-        # networks will redirect connections to lower-load servers
-        # this will get the actual host (ip, port) connected to
-        host, port = self.writer.get_extra_info('peername')
+    async def _run(self):
         
-        # :<HOST> CONNECTED <PORT>
-        line = utils.ircjoin(':' + host, constants.CONNECTED, port).encode(self.encoding)
+        # local scope for speedier loops
+        queue = self.queue
         
-        # feed the pseudocommand to the StreamReader
-        # allows it to be the first line read when async iterated over
-        self.reader.feed_data(line)
-        
-    
-    def _disconnected_message(self):
-        # networks will redirect connections to lower-load servers
-        # this will get the actual host (ip, port) that we had connected to
-        # just in case we want to reconnect to that specific server
-        host, port = self.writer.get_extra_info('peername')
+        while True:
+            
+            line = await queue.get()
+            
+            # this is so the task completes gracefully
+            if line is AsyncConnection.EXIT:
+                queue.task_done()
+                break
+            
+            self.transport.write(line)
+            queue.task_done()
 
-        # :<HOST> DISCONNECTED <PORT>
-        line = utils.ircjoin(':' + host, constants.DISCONNECTED, port).encode(self.encoding)
-        
-        # can't feed data to the reader after it has received eof (which signals disconnect)
-        # send this one directly to the handle method
-        asyncio.ensure_future(self.handle(line))
     
-    
+    @abc.abstractmethod
+    def handle(self, line):
+        pass

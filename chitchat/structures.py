@@ -1,8 +1,78 @@
+import asyncio
 import collections
+import functools
 import itertools
 
 from . import utils
 
+
+class Callback:
+    """
+    A callback triggered upon receiving messages from the connected server.
+    """
+    
+    
+    def __init__(self, func, validator):
+        self.func = func
+        self.validator = validator
+        
+        self.awaitable = asyncio.iscoroutinefunction(func)
+    
+    
+    async def __call__(self, *args):
+        
+        if not self.validate(*args):
+            return False
+        
+        if self.awaitable:
+            result = await self.func(*args)
+        
+        else:
+            result = self.func(*args)
+            
+        return result
+    
+    
+    def validate(self, *args):
+        """
+        Determines whether passed arguments are sufficient to trigger the wrapped
+        function.
+        
+        This will return False at the first opportunity to indicate that the supplied
+        arguments are insufficient and True if all conditions are met.
+        """
+        
+        return self.validator(*args)
+    
+        
+    def __repr__(self):
+        line = '{0.__class__.__name__}(func={0.func.__name__}, validator={0.validator!r})'
+        return line.format(self)
+    
+    
+def Validator(*, nick=True, user=True, host=True, target=True, text=True):
+    
+    funcs = (
+        utils.as_comparable(nick),
+        utils.as_comparable(user),
+        utils.as_comparable(host),
+        utils.as_comparable(target),
+        utils.as_comparable(text)
+    )
+    
+    @functools.lru_cache(maxsize=128)
+    def validate(prefix_, target_, text_=None):
+        
+        params = (*utils.prefixsplit(prefix_), target_, text_)
+            
+        return all(func(arg) for func, arg in zip(funcs, params))
+    
+    rep = 'Validator(nick={0}, user={1}, host={2}, target={3}, text={4})'
+    validate.__repr__ = rep.format(nick, user, host, target, text)
+    
+    return validate
+    
+    
 
 class prefix(str):
     """
@@ -14,7 +84,6 @@ class prefix(str):
     
     __slots__ = ('nick', 'user', 'host')
     
-    # immutables initialize in __new__, not __init__
     def __new__(cls, ircprefix):
         inst = super().__new__(cls, ircprefix)
         inst.nick, inst.user, inst.host = utils.prefixsplit(ircprefix)
@@ -31,6 +100,17 @@ class CaseInsensitiveDefaultDict(collections.abc.MutableMapping):
     
     Write an example for me!
     """
+        
+    
+    @staticmethod
+    def _transform(key):
+        """Supports non-string keys."""
+        
+        try:
+            return key.casefold()
+        
+        except AttributeError:
+            return key
     
     
     def __init__(self, default_factory, data=None, **kwargs):
@@ -42,16 +122,6 @@ class CaseInsensitiveDefaultDict(collections.abc.MutableMapping):
             data = {}
             
         self.update(data, **kwargs)
-        
-    
-    def _transform(self, key):
-        """Supports non-string keys."""
-        
-        try:
-            return key.casefold()
-        
-        except AttributeError:
-            return key
         
     
     def __setitem__(self, key, value):

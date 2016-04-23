@@ -1,156 +1,199 @@
 import asyncio
-import collections
 import functools
+import inspect
 
-from .connection import IRCProtocol
-from . import constants, decorator, structures, utils
+from . import connection, constants, structures, utils
 
 
-class Client:
+class Client(connection.AsyncConnection):
     
     
     def __init__(self, *, encoding='UTF-8', loop=None):
-        self.encoding = encoding
-        self.loop = loop or asyncio.get_event_loop()
+        super().__init__(
+            encoding=encoding,
+            loop=loop or asyncio.get_event_loop()
+        )
 
         # list ensures plugins trigger in the order they were added
-        self.plugins = structures.CaseInsensitiveDefaultDict(list)
-        self.protocol = None
-    
-    
-    async def handle(self, line):
-        """
-        Called to handle each line received from the server.
-        """
-        
-        decoded = line.decode(self.encoding)
-        
-        try:
-            # split message into its component parts
-            prefix, command, params = utils.ircsplit(decoded)
-        except ValueError:
-            raise ValueError(decoded)
-        
-        # parses the nick, user, and host from prefix and sets as attributes
-        prefix = structures.prefix(prefix)
-        
-        triggered = await self.trigger(command, prefix, *params)
-        
-        return triggered
-    
-    
-    def on(self, command=constants.PRIVMSG, **conditions):
-        """
-        Decorator for functions to trigger upon receiving a specified type of message.
-        """
-        
-        # the method called to handle lines returned by the callback
-        handler = self.send
-        conditional = utils.conditional(**conditions)
-        
-        # method called to register the callback with the listener
-        registrar = functools.partial(self.register, command, conditional=conditional)
-        
-        return decorator.callback(handler, registrar)
-    
-    
-    def register(self, command, func, conditional=None):
-        """
-        Adds a function to the client's set of triggers.
-        """
-        
-        self.plugins[command].append((func, conditional))
-            
-        return self.plugins
+        self.callbacks = structures.CaseInsensitiveDefaultDict(list)
     
     
     async def connect(self, host, port, **kwargs):
+        """
+        Connect to a remote `host` on port `port`. Additional kwargs are passed to
+        `asyncio.BaseEventLoop.create_connection`.
         
-        # don't store the host, port, etc. as attributes to make
-        # it clear that they can't be changed while connected
+        Triggers functions decorated with @chitchat.on('CONNECTED').
+        """
         
-        protocol = IRCProtocol(client=self, loop=self.loop)
-        
-        self.transport, self.protocol = await self.loop.create_connection(
-            (lambda: protocol), host, port, **kwargs
-        )
+        await super().connect(host, port, **kwargs)
         
         # trigger CONNECTED commands with remote peer host and port
         peer = self.transport.get_extra_info('peername')
-        await self.trigger(constants.CONNECTED, *peer)
+        self.trigger(constants.CONNECTED, *peer)
         
         
-    async def disconnect(self):
+    async def disconnect(self, exc=None):
+        """
+        Closes the transport after disconnecting from the remote host.
         
-        # must grab this info before we close the transport
+        Triggers functions decorated with @chitchat.on('DISCONNECTED') with the remote
+        host and port, and any exception propagated from the server. No messages are
+        sent after this function is called, until reconnecting to the server. Any messages
+        returned by triggered functions will be sent as soon as the client reconnects.
+        
+        args:
+            exc: Exception propagated from the transport. This exception is passed as
+                 the last argument to any function triggered.
+        """
+        
+        # remote host and port must be grabbed before AsyncConnection closes the transport
         peer = self.transport.get_extra_info('peername')
         
-        # close the transport, blocking any more data from being sent to the server
-        self.transport.close()
-        self.transport = None
+        # closes the transport, no messages are sent after this until reconnected
+        await super().disconnect(exc)
         
-        # trigger DISCONNECTED commands with remote peer host and port
-        await self.trigger(constants.DISCONNECTED, *peer)
+        # trigger afterwards, as a triggered function may want to reconnect
+        self.trigger(constants.DISCONNECTED, *peer, exc)
+
+    
+    def handle(self, line):
+        """
+        Called by the protocol to handle each line received from the server.
+        """
+        command, *params = self.parse(line)
+        self.trigger(command, *params)
+        
+        
+    def parse(self, line):
+        decoded = line.decode(self.encoding)
+        prefix, command, params = utils.ircsplit(decoded)
+        
+        return (command, structures.prefix(prefix), *params)
+    
+    
+    def on(self, command, *, validator=None, **kwargs):
+        """
+        Register a function to be called when a message of type `command` is received.
+        """
+        
+        if validator is None:
+            validator = structures.Validator(**kwargs)
+        
+        def wrapped(func):
+            cb = structures.Callback(func, validator)
+            # cb = structures.Callback(func, kwargs)
+            self.register(command, cb)
+            
+            # return original function so this decorator can be chained
+            return func
+        
+        return wrapped
+    
+    
+    def register(self, command, callback):
+        """
+        Add an asynchronous function to a client's set of callbacks.
+        """
+        cb = callback
+        self.callbacks[command].append(cb)
+    
+    
+    def deregister(self, command, callback):
+        """
+        Remove a function from a client's set of callbacks.
+        """
+        cb = callback
+        self.callbacks[command].remove(cb)
+    
+    
+    def trigger(self, command, *args):
+        """
+        Arrange for registered callbacks to be run with args, and for their returned
+        values to be sent to the server.
+        """
+        
+        callbacks = self.callbacks[command] + self.callbacks[constants.ALL]
+        
+        # schedule the coroutines to be executed and awaited
+        # a separate task awaits each coroutine so they don't block each other
+        for cb in callbacks:
+            coro = self._run_callback(cb, *args)
+            self.loop.create_task(coro)
+            
+        return callbacks
 
     
     def run(self, host, port, **kwargs):
-        self.loop.run_until_complete(self.connect(host, port, **kwargs))
-        self.loop.run_forever()
         
-    
-    async def send(self, lines):
+        coro = self.connect(host, port, **kwargs)
+        self.loop.run_until_complete(coro)
         
-        if not self.protocol:
-            raise RuntimeError('connect to a server first')
-        
-        self.protocol.send(lines)
-    
-    
-    async def trigger(self, command, *args, **kwargs):
-        """
-        Passes parsed arguments to any registered listeners.
-        """
-        
-        # TODO: move conditions inside function call so they don't block in the loop
-        #       can return early if the message is insufficient
-        
-        plugins = self.plugins[command]
-        
-        for func, conditions in plugins:
+        try:
+            self.loop.run_forever()
             
-            if not conditions or conditions(*args, **kwargs):
-                coro = func(*args, **kwargs)
-                self.loop.create_task(coro)
+        except KeyboardInterrupt:
+            pass
+            
+        finally:
+            self.loop.close()
     
     
-    def wait_for(self, command=constants.PRIVMSG, timeout=None, **conditions):
+    def wait_for(self, command, *, timeout=None, **kwargs):
         
         # this function returns a coroutine that must be awaited
         # but is not a (native or otherwise) coroutine itself
-        # async def would require a user to decorate their plugin with @asyncio.coroutine
+        # async def would require a user to decorate their plugin with @types.coroutine
         
         future = asyncio.Future(loop=self.loop)
         
-        async def waiter(*args, **kwargs):
+        def waiter(*args):
             
             # multiple messages can trigger our waiter before the done callback
             # has had a chance to remove the waiter from a client's plugins
             # so we'll make sure the future's result hasn't been set by a previous
             # message before we attempt to set it
             
-            if not future.done(): # does this encounter a race condition?
+            if not future.done():
                 future.set_result(args)
         
-        # TODO: handle conditions
-        self.register(command, waiter, None)
+        cb = structures.Callback(waiter, structures.Validator(**kwargs))
+        self.register(command, cb)
         
         def remove(future):
-            self.plugins[command].remove((waiter, None))
-            
+            self.deregister(command, cb)
+        
         # create a callback to remove the future from our plugins once it completes
         future.add_done_callback(remove)
         
-        # coroutine must be awaited
+        # wrap future in asyncio.wait_for to allow for a timeout
         return asyncio.wait_for(future, timeout)
+
+    
+    async def _run_callback(self, callback, *args):
+        """
+        Asynchronously runs a triggered callback function and schedules any yielded or
+        returned lines to be sent to the server.
+        """
         
+        result = await callback(*args)
+        
+        try:
+            lines = iter(result)
+            
+        except TypeError as e:
+            # not all callbacks will return a line, e.g., a message logger
+            lines = []
+        
+        for line in lines:
+            # coroutines like Client.wait_for or asyncio.sleep must be awaited
+            if inspect.isawaitable(line):
+                # assume they don't produce anything to send, this behavior may change
+                await line
+                continue
+            
+            if line:
+                await super().send(line)
+                
+        return
         
