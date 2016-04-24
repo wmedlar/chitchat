@@ -130,7 +130,7 @@ class AsyncConnection:
             # this is so the task completes gracefully
             if line is AsyncConnection.EXIT:
                 queue.task_done()
-                break
+                return
             
             self.transport.write(line)
             queue.task_done()

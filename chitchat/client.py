@@ -57,16 +57,16 @@ class Client(connection.AsyncConnection):
         self.trigger(constants.DISCONNECTED, *peer, exc)
 
     
-    def handle(self, line):
+    def handle(self, raw):
         """
         Called by the protocol to handle each line received from the server.
         """
-        command, *params = self.parse(line)
+        command, *params = self.parse(raw)
         self.trigger(command, *params)
         
         
-    def parse(self, line):
-        decoded = line.decode(self.encoding)
+    def parse(self, raw):
+        decoded = raw.decode(self.encoding)
         prefix, command, params = utils.ircsplit(decoded)
         
         return (command, structures.prefix(prefix), *params)
@@ -122,6 +122,17 @@ class Client(connection.AsyncConnection):
             self.loop.create_task(coro)
             
         return callbacks
+    
+    
+    async def shutdown(self):
+        
+        await self.queue.put(connection.AsyncConnection.EXIT)
+        await self.queue.join()
+        
+        for task in asyncio.Task.all_tasks():
+            task.cancel()
+            
+        self.loop.stop()
 
     
     def run(self, host, port, **kwargs):
@@ -133,7 +144,8 @@ class Client(connection.AsyncConnection):
             self.loop.run_forever()
             
         except KeyboardInterrupt:
-            pass
+            coro = self.shutdown()
+            self.loop.run_until_complete(coro)
             
         finally:
             self.loop.close()
@@ -177,23 +189,16 @@ class Client(connection.AsyncConnection):
         """
         
         result = await callback(*args)
+        it = filter(None, result or [])
         
-        try:
-            lines = iter(result)
+        for i in it:
             
-        except TypeError as e:
-            # not all callbacks will return a line, e.g., a message logger
-            lines = []
-        
-        for line in lines:
-            # coroutines like Client.wait_for or asyncio.sleep must be awaited
-            if inspect.isawaitable(line):
-                # assume they don't produce anything to send, this behavior may change
-                await line
-                continue
+            try:
+                # coroutines like Client.wait_for or asyncio.sleep must be awaited
+                await i
             
-            if line:
-                await super().send(line)
+            except TypeError:
+                # non-awaitables are sent to the server
+                await self.send(i)
                 
         return
-        
