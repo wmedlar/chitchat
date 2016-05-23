@@ -151,15 +151,15 @@ class lazyproperty:
     
     def __init__(self, fget):
         self.fget = fget
-        self.name = fget.__name__
+        self.attr_name = fget.__name__
         
         
     def __get__(self, instance, owner=None):
         if instance is None:
-            return None
+            return self
         
         value = self.fget(instance)
-        # replace the descriptor with the returned value
-        setattr(instance, self.name, value)
+        # replace the property with the returned value
+        setattr(instance, self.attr_name, value)
         
         return value
