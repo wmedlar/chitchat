@@ -4,9 +4,10 @@ import itertools
 import pkgutil
 import re
 import textwrap
+import types
 
 
-from . import constants
+from . import constants, exceptions
 
 
 def ircjoin(*args, spaced=None):
@@ -33,25 +34,62 @@ def ircjoin(*args, spaced=None):
     return line.format(*args, spaced) + constants.CRLF
 
 
+Message = collections.namedtuple('Message', ['prefix', 'command', 'params'])
+
+
 def ircsplit(message):
     """
-    Parses an IRC message into its component prefix, command, and parameters.
-    """
-
-    if message.startswith(':'):
-        prefix, message = message[1:].split(maxsplit=1)
+    Parse an IRC message into its component prefix, command, and parameters, according to
+    the general structure `:prefix command params\r\n`.
+    
+    Prefix and command are returned as strings; params is returned as a tuple. Delimiters
+    are not part of the result, and each component may be empty.
+    
+    This function does not determine whether a message is valid -- that is whether it
+    contains all the appropriate components in the proper order -- rather it simply
+    separates an arbitrary string into likely components, similar to
+    `urllib.parse.urlparse`.
+    
+    args:
+        message: A string representing the IRC message to parse.
         
+    returns:
+        A namedtuple containing `prefix`, `command`, and `params` read-only attributes.
+    """
+    message = message.rstrip('\r\n')
+    
+    try:
+        # last arg is separated by ' :' and may contain spaces itself
+        leading, spaced = message.rsplit(' :', maxsplit=1)
+    
+    except ValueError:
+        leading, spaced = message, None
+    
+    try:
+        # all remaining args are space-delimited
+        first, *remaining = leading.split()
+        
+    except ValueError:
+        # leading is empty or is all whitespace, so this message has no other args
+        first, remaining = '', ()
+    
+    if first.startswith(':'):
+        # leading colon signifies presence of (non-empty) prefix
+        prefix = first[1:]
+        # command must be second arg, or non-existent if remaining is empty
+        command, *remaining = remaining or ('', )
+    
     else:
-        prefix = ''
+        # no prefix means leading arg is command
+        prefix, command = '', first
+    
+    # concatenate remaining args, if any, into tuple
+    params = tuple(remaining) if spaced is None else (*remaining, spaced)
+    
+    return Message(prefix, command, params)
 
-    # ' :' signifies the final parameter, which may contain any character except NUL ('\0') or CRLF ('\r\n')
-    # prior parameters may contain a colon if and only if it is not the first character
-    message, *trailing = message.split(' :', maxsplit=1)
 
-    # command is the first arg of message, remainder are concatenated with trailing into params
-    command, *params = *message.split(), *trailing
-
-    return prefix, command, params
+Prefix = collections.namedtuple('Prefix', ['nick', 'user', 'host'])
 
 
 def prefixsplit(prefix):
@@ -62,11 +100,11 @@ def prefixsplit(prefix):
         prefix: A string representing the IRC prefix to parse.
     
     returns:
-        A tuple containing the parsed nick, user, and host, in that order.
+        A namedtuple containing the parsed nick, user, and host as strings.
     """
     
     if not prefix:
-        return '', '', ''
+        return Prefix(nick='', user='', host='')
     
     try:
         nick, prefix = prefix.split('!', maxsplit=1)
@@ -82,7 +120,7 @@ def prefixsplit(prefix):
         user = ''
         host = prefix if not nick else ''
         
-    return nick, user, host
+    return Prefix(nick, user, host)
 
 
 def ischannel(chanstring, prefixes=None):
@@ -110,7 +148,46 @@ def ischannel(chanstring, prefixes=None):
     return (chanstring.startswith(prefixes) and
             len(chanstring) <= max_len and
             not restricted.intersection(chanstring))
+
+
+class lazyproperty:
+    """
+    Code modified from:
+    http://stackoverflow.com/questions/3012421/python-lazy-property-decorator/6849299#6849299
+    """
     
+    def __init__(self, fget):
+        self.fget = fget
+        self.name = fget.__name__
+        
+        
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return None
+        
+        value = self.fget(instance)
+        # replace the descriptor with the returned value
+        setattr(instance, self.name, value)
+        
+        return value
+
+
+async def try_await(possible_coroutine):
+    """
+    Attempts to await result of `possible_coroutine`.
+    
+    If `possible_coroutine` is a coroutine, return its result, otherwise return
+    `possible_coroutine`.
+    """
+    
+    try:
+        result = await possible_coroutine
+        
+    except TypeError:
+        result = possible_coroutine
+        
+    return result
+
     
 def as_comparable(arg):
     
