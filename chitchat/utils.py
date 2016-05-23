@@ -30,7 +30,7 @@ def ircjoin(*args, spaced=None):
 Message = collections.namedtuple('Message', ['prefix', 'command', 'params'])
 
 
-def ircsplit(message):
+def ircparse(message):
     """
     Parse an IRC message into its component prefix, command, and parameters, according to
     the general structure `:prefix command params\r\n`.
