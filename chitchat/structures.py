@@ -1,7 +1,6 @@
 import asyncio
 import collections
 import functools
-import itertools
 
 from . import utils
 
@@ -178,8 +177,5 @@ class CaseInsensitiveDefaultDict(collections.abc.MutableMapping):
     
     
     @classmethod
-    def fromkeys(cls, default_factory, seq, value=None):
-        # repeat value indefinitely
-        repeater = itertools.repeat(value)
-        
-        return cls(default_factory, zip(seq, repeater))
+    def fromkeys(cls, default_factory, seq, value=None):        
+        return cls(default_factory, dict.fromkeys(seq, value))
