@@ -1,6 +1,7 @@
 import collections
 
-from . import constants, exceptions
+from . import constants
+from . import structures
 
 
 def ircjoin(*args, spaced=None):
@@ -145,7 +146,7 @@ def ischannel(chanstring, prefixes=None):
 
 def isplugin(object):
     """Returns True if the object is a `Plugin`."""
-    return isinstance(object, Plugin)
+    return isinstance(object, structures.Plugin)
 
 
 def find_plugins(object=None):
