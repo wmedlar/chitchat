@@ -143,6 +143,40 @@ def ischannel(chanstring, prefixes=None):
             not restricted.intersection(chanstring))
 
 
+def isplugin(object):
+    """Returns True if the object is a `Plugin`."""
+    return isinstance(object, Plugin)
+
+
+def find_plugins(object=None):
+    """Find all `Plugin` instances in `object`.
+    
+    If `object` is `None`, find all `Plugin` instances in the current module (i.e.,
+    __main__). If `object` itself is a `Plugin` instance, it will be yielded first,
+    before checking its members.
+    
+    This function will only discover `Plugin` instances in the top-level namespace of
+    `object`.
+    
+    args:
+        object: object to search that may be a `Plugin` instance, or may contain
+                members that are `Plugin` instances
+    
+    yields:
+        `Plugin` instances found in `object`.
+    """
+    if object is None:
+        object = sys.modules['__main__']
+    
+    elif isplugin(object):
+        yield object
+        # don't return early as `object` may have plugins as members
+        # unlikely, but we'll check anyway on the off chance
+    
+    for name, value in inspect.getmembers(object, isplugin):
+        yield value
+
+
 class lazyproperty:
     """
     Code modified from:
