@@ -1,141 +1,151 @@
-import abc
 import asyncio
-
-from . import constants, structures, utils
-
-
-class IRCProtocol(asyncio.Protocol):
+import abc
     
     
-    def __init__(self, client, loop=None):
-        self.client = client
-        self.loop = loop or asyncio.get_event_loop()
+class AsynchronousConnection:
+    """
+    Attributes:
+        loop:
+    """
+    
+    def __init__(self, *, loop=None):
+        self._loop = loop or asyncio.get_event_loop()
         
-        self.buffer = bytearray()
-    
-    
-    def connection_lost(self, exc):
-        coro = self.client.disconnect(exc=exc)
-        self.loop.create_task(coro)
-    
-    
-    def data_received(self, data):
+        self.reader, self.writer = None, None
         
-        self.buffer.extend(data)
-        
-        try:
-            # splits the buffer at the rightmost newline
-            # new buffer will be empty if a full line is received
-            lines, self.buffer = self.buffer.rsplit(b'\n', maxsplit=1)
-            
-        except ValueError:
-            # buffer is only part of a single line
-            # wait to receive more data before passing this to the client
-            return
-        
-        for line in lines.splitlines():
-            self.client.handle(line)
     
-    
-    def eof_received(self):
+    @abc.abstractmethod
+    def handle_incoming(self, data):
+        """Called to handle each line of data sent by the server."""
         pass
         
         
-class AsyncConnection:
-    """
-    An asynchronous connection object for reading from and writing to an IRC server.
-    """
-    
-    EXIT = object()
+    @property
+    def loop(self):
+        """Read-only event loop."""
+        return self._loop
     
     
-    def __init__(self, encoding, loop):
-        self.encoding = encoding
-        self.loop = loop
+    @property
+    def connected(self):
+        """Read-only connection status."""
+        try:
+            # if reader or writer have received EOF then we've disconnected
+            return (not self.reader.at_eof()) and (not self.writer.is_closing())
         
-        # override in subclass for some form of flood control?
-        self.queue = asyncio.Queue(maxsize=0, loop=loop)
-        
-        self.transport = None
-        self.protocol = None
-        
-        
-    def protocol_factory(self):
-        """
-        Factory function for creating IRCProtocol instances.
-        """
-        return IRCProtocol(client=self, loop=self.loop)  
+        except AttributeError:
+            # reader/writer haven't been set yet
+            return False
     
+    
+    async def run(self, host, port, **kwargs):
+        
+        await self.connect(host, port, **kwargs)
+        
+        handle = self.handle_incoming
+        
+        # iterate over lines as they're received, until EOF
+        async for line in self.reader:
+            handle(line)
+        
+        await self.disconnect()
+        
+    
+    def run_blocking(self, host, port, **kwargs):
+    
+        coro = self.run(host, port, **kwargs)
+        self.loop.run_until_complete(coro)
+
     
     async def connect(self, host, port, **kwargs):
         """
-        Connect to a remote `host` on port `port`. Additional kwargs are passed to
-        `asyncio.BaseEventLoop.create_connection`.
+        Open a connection to `host`.
+        """        
+        streams = await asyncio.open_connection(host, port, loop=self.loop, **kwargs)
         
-        Triggers functions decorated with @chitchat.on('CONNECTED').
-        """
+        self.reader, self.writer = streams
         
-        # don't store the host, port, etc. as attributes to make
-        # it clear that they can't be changed while connected
-        
-        self.transport, self.protocol = await self.loop.create_connection(
-            self.protocol_factory, host, port, **kwargs
-        )
-        
-        self.loop.create_task(self._run())
-        
-        
-    async def disconnect(self, exc=None):
-        """
-        Cleans up the transport after disconnecting from the remote host and stops the
-        event loop.
-        
-        Triggers functions decorated with @chitchat.on('DISCONNECTED') with the remote
-        host and port, and any exception propagated from the server.
-        
-        args:
-            exc: Exception propagated from the transport. This exception is passed as
-                 the last argument to any function triggered.
-        """
-        
-        # let the queue know it ought to stop, otherwise it would
-        # block until it received another message that will never come
-        await self.queue.put(AsyncConnection.EXIT)
-        await self.queue.join()
-        
-        self.transport = None
-        self.protocol = None
-        
-        
-    async def send(self, line):
-        """Schedules a line to be sent to the host server."""
-        
-        # strings have to be encoded before sending
-        if isinstance(line, str):
-            line = line.encode(self.encoding)
-        
-        # queue implemented for flood control
-        await self.queue.put(line)
-        
+        return streams
     
-    async def _run(self):
+    
+    async def disconnect(self):
+        """
+        Close the connection with the host.
+        """
+        self.close_streams()
+        self.reader, self.writer = None, None
         
-        # local scope for speedier loops
-        queue = self.queue
         
-        while True:
+    def close_streams(self):
+        reader, writer = self.reader, self.writer
+        
+        if not reader.at_eof():
+            reader.feed_eof()
+        
+        if writer.can_write_eof():
+            writer.write_eof()
             
-            line = await queue.get()
-            
-            # this is so the task completes gracefully
-            if line is AsyncConnection.EXIT:
-                queue.task_done()
-                return
-            
-            self.transport.write(line)
-            queue.task_done()
+        writer.close()
+        
+        
+    async def read(self, n=None):
+        """
+        Read up to `n` bytes.
+        
+        If `n` is not provided, or negative, read until EOF and return all bytes.
+        
+        This method is a coroutine.
+        """
+        # default of None is more Pythonic than -1
+        n = -1 if n is None or n < 0 else n
+        return self.reader.read(n)
+    
+    
+    async def readline(self):
+        """
+        Read one line, where "line" is a sequence of bytes ending with "\n".
+        
+        If EOF is received, and \n was not found, the method will return the partial read
+        bytes.
 
+        If the EOF was received and the internal buffer is empty, return an empty bytes
+        object.
+        
+        This method is a coroutine.
+        """
+        return self.reader.readline()
     
-    @abc.abstractmethod
-    def handle(self, line):
-        pass
+    
+    async def readexactly(self, n):
+        """
+        Read exactly `n` bytes.
+        
+        Raise an `asyncio.IncompleteReadError` if the end of the stream is reached before
+        `n` can be read, the `asyncio.IncompleteReadError.partial` attribute of the
+        exception contains the partial read bytes.
+        
+        This method is a coroutine.
+        """
+        return self.reader.readexactly(n)
+    
+    
+    async def write(self, data):
+        """
+        Write some data bytes to the transport and flush the buffer.
+        
+        This method is a coroutine.
+        """
+        writer = self.writer
+        writer.write(data)
+        await writer.drain()
+        
+        
+    async def writelines(self, data):
+        """
+        Write an iterable of data bytes to the transport and flush the buffer.
+        
+        This method is a coroutine.
+        """
+        writer = self.writer
+        writer.writelines(data)
+        await writer.drain()
