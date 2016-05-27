@@ -50,7 +50,8 @@ def ircparse(message):
     returns:
         A namedtuple containing `prefix`, `command`, and `params` read-only attributes.
     """
-    message = message.rstrip('\r\n')
+    # strip off trailing carriage returns ('\r') and newlines ('\n')
+    message = message.rstrip(constants.CRLF)
     
     try:
         # last arg is separated by ' :' and may contain spaces itself
